@@ -441,6 +441,13 @@ def listed(state: Path) -> list[dict]:
     return [{"name": p["name"], "items": _held(p), "current": p["id"] == data["current"]} for p in data["palettes"]]
 
 
+def names(state: Path) -> set[str]:
+    """The names the current palette's items go by, kept-out ones too: what a later variation of a made sound is
+    numbered past when it's kept there (`snapshots.palette_artifacts`). Empty with no current palette."""
+    palette = _current(load(state))
+    return {item["name"] for item in palette["items"] if isinstance(item.get("name"), str)} if palette else set()
+
+
 # Writes, each in one line of words.
 
 

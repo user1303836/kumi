@@ -23,7 +23,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Collection
 
 log = logging.getLogger(__name__)
 
@@ -591,13 +591,13 @@ def _cut_at_word(text: str, most: int) -> str:
     return f"{(cut[:space] if space > most / 2 else cut).rstrip()}…"
 
 
-def _design_name(answer: dict) -> str:
-    """What a palette calls a sound the dashboard made, by the UI's rule (`resultName`): how it was made and from what,
-    "Blend of Kick 02 + Tom 4", "Stack of Punch Kick 09 + 14 more" (two names only when both are short), never a seed
-    or an id; a grown sound by its recipe's lead. At most 80 characters, the count of the rest always whole."""
+def _design_name_within(answer: dict, most: int) -> str:
+    """A made sound's name in at most `most` characters (the UI's `nameWithin`): how it was made and from what,
+    "Blend of Kick 02 + Tom 4", "Stack of Punch Kick 09 + 14 more" (two names only when both are short); a grown sound
+    by its recipe's lead. The count of the rest is always whole."""
     recipe = answer.get("recipe") if isinstance(answer.get("recipe"), str) else ""
     if answer.get("op") == "grow":
-        return _cut_at_word(_said(re.split(r"[:;]", recipe, maxsplit=1)[0], 200), _MADE_NAME_MOST) or "Grown"
+        return _cut_at_word(_said(re.split(r"[:;]", recipe, maxsplit=1)[0], 200), most) or "Grown"
     mode, op = (value if isinstance(value, str) else "" for value in (answer.get("mode"), answer.get("op")))
     way = _MADE_WAYS.get(mode) or _MADE_WAYS.get(op) or "Design"
     listed = answer.get("sources")
@@ -610,7 +610,24 @@ def _design_name(answer: dict) -> str:
     lead = f"{way} of "
     rest = f" + {total - len(named)} more" if total > len(named) else ""
     second = f" + {named[1]}" if len(named) > 1 else ""
-    return f"{lead}{_cut_at_word(named[0], _MADE_NAME_MOST - len(lead) - len(rest) - len(second))}{second}{rest}"
+    return f"{lead}{_cut_at_word(named[0], most - len(lead) - len(rest) - len(second))}{second}{rest}"
+
+
+def _design_name(answer: dict, taken: Collection[str] = ()) -> str:
+    """What a palette calls a sound the dashboard made, by the UI's rule (`resultName`): `_design_name_within` in 80
+    characters, never a seed or an id. The seed stays behind the result's Details, so two variations of one recipe
+    would read alike: a later one is numbered past the names `taken` has (the palette's own), " · 2", " · 3", the
+    number inside the 80."""
+    plain = _design_name_within(answer, _MADE_NAME_MOST)
+    if plain not in taken:
+        return plain
+    n = 2
+    while True:
+        mark = f" · {n}"
+        name = f"{_design_name_within(answer, _MADE_NAME_MOST - len(mark))}{mark}"
+        if name not in taken:
+            return name
+        n += 1
 
 
 def media(state: Path, media_id: str, library_folders: list[str] | None = None, *, current: dict | None = None) -> dict | None:
@@ -658,10 +675,11 @@ def artifact_file(state: Path, artifact_id: str) -> str | None:
     return _real_file(entry.get("path"), _artifact_roots(state)) if entry is not None else None
 
 
-def palette_artifact(state: Path, artifact_id: Any, library_folders: list[str] | None = None) -> str | None:
+def palette_artifact(state: Path, artifact_id: Any, library_folders: list[str] | None = None,
+                     taken: Collection[str] = ()) -> str | None:
     """The name a palette keeps for an artifact it gathers (its own `name`, else its file's stem; a sound the dashboard
-    made, by its recipe and seed), when it's audio the media guard serves (`media`, so `/audio?id=` plays it); None for
-    anything else, a map sound's id included."""
+    made, by how it was made and from what, numbered past the palette's names `taken`), when it's audio the media
+    guard serves (`media`, so `/audio?id=` plays it); None for anything else, a map sound's id included."""
     if not isinstance(artifact_id, str) or len(artifact_id) > 128:
         return None
     entry = _artifacts(state).get(artifact_id)
@@ -670,11 +688,24 @@ def palette_artifact(state: Path, artifact_id: Any, library_folders: list[str] |
     if found is None or not found["mime"].startswith("audio/"):
         return None
     if designed is not None:
-        return _design_name(designed)
+        return _design_name(designed, taken)
     name = entry.get("name")
     if isinstance(name, str) and name.strip():
         return " ".join(name.split())[:200]
     return os.path.splitext(os.path.basename(found["path"]))[0]
+
+
+def palette_artifacts(state: Path, artifact_ids: list[str], library_folders: list[str] | None,
+                      taken: Collection[str]) -> list[tuple[str, str | None]]:
+    """`palette_artifact` for each id of one gather, in order: each made sound numbered past the palette's names
+    (`taken`) and past the ones named before it in the same gather."""
+    named, out = set(taken), []
+    for artifact_id in artifact_ids:
+        name = palette_artifact(state, artifact_id, library_folders, named)
+        out.append((artifact_id, name))
+        if name is not None:
+            named.add(name)
+    return out
 
 
 def _artifact_roots(state: Path) -> list[Path]:

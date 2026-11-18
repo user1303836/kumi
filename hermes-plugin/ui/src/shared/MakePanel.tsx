@@ -902,12 +902,12 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               {t('make.clearChosen')}
             </Button>
             {chosenJoin && (
-              <Button kind={chosenAlone ? 'secondary' : 'primary'} onClick={() => makeFrom([...sources, ...chosenNew.map(sourceOfResult)])} tip={t('make.addToSoundsTitle')}>
+              <Button kind={chosenAlone ? 'secondary' : 'primary'} onClick={() => makeFrom([...sources, ...chosenNew.map(result => sourceOfResult(result))])} tip={t('make.addToSoundsTitle')}>
                 {t('make.addToSounds')}
               </Button>
             )}
             {chosenAlone && (
-              <Button kind="primary" onClick={() => makeFrom(chosenResults.map(sourceOfResult))} tip={t('make.fromTheseTitle')}>
+              <Button kind="primary" onClick={() => makeFrom(chosenResults.map(result => sourceOfResult(result)))} tip={t('make.fromTheseTitle')}>
                 {t('make.fromThese')}
               </Button>
             )}

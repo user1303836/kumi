@@ -1,5 +1,5 @@
 {
-  "about": "The name a made sound gets: the UI's resultName (ui/src/shared/design.ts) and the backend's _design_name (snapshots.py) follow one rule, and ui/tests/design.test.mjs and tests/test_designs.py both read this file. A new way of making goes in `ways`, with a case; both tables must equal `ways`. In `sources`, null is a sound with no name.",
+  "about": "The name a made sound gets: the UI's resultName (ui/src/shared/design.ts) and the backend's _design_name (snapshots.py) follow one rule, and ui/tests/design.test.mjs and tests/test_designs.py both read this file. A new way of making goes in `ways`, with a case; both tables must equal `ways`. In `sources`, null is a sound with no name. `taken` is the names the palette has already: a later variation of one recipe is numbered past them, the number inside the 80 characters.",
   "ways": {
     "blend": "Blend",
     "attack": "Attack",
@@ -30,6 +30,12 @@
     { "op": "loop", "sources": ["Break 7"], "name": "Loop of Break 7" },
     { "op": "stack", "sources": ["Punch Kick 00", "Punch Kick 01", "Punch Kick 02"], "name": "Stack of Punch Kick 00 + Punch Kick 01 + 1 more" },
     { "op": "stack", "sources": [null, null, null], "name": "Stack of 3 sounds" },
-    { "op": "grow", "recipe": "Grown 50% of the way from Kick toward Tom; seed 4", "sources": [], "name": "Grown 50% of the way from Kick toward Tom" }
+    { "op": "grow", "recipe": "Grown 50% of the way from Kick toward Tom; seed 4", "sources": [], "name": "Grown 50% of the way from Kick toward Tom" },
+    { "op": "cross", "mode": "blend", "sources": ["Kick 02", "Tom 4"], "taken": ["Blend of Kick 02 + Tom 4"], "name": "Blend of Kick 02 + Tom 4 · 2" },
+    { "op": "cross", "mode": "blend", "sources": ["Kick 02", "Tom 4"], "taken": ["Blend of Kick 02 + Tom 4", "Blend of Kick 02 + Tom 4 · 2", "Tom 4"], "name": "Blend of Kick 02 + Tom 4 · 3" },
+    { "op": "cross", "mode": "blend", "sources": ["An Extremely Long Field Recording Of Rain On A Tin Roof At Night In The Hills Of Wales"], "name": "Blend of An Extremely Long Field Recording Of Rain On A Tin Roof At Night In…" },
+    { "op": "cross", "mode": "blend", "sources": ["An Extremely Long Field Recording Of Rain On A Tin Roof At Night In The Hills Of Wales"], "taken": ["Blend of An Extremely Long Field Recording Of Rain On A Tin Roof At Night In…"], "name": "Blend of An Extremely Long Field Recording Of Rain On A Tin Roof At Night… · 2" },
+    { "op": "stack", "sources": [null, null, null], "taken": ["Stack of 3 sounds"], "name": "Stack of 3 sounds · 2" },
+    { "op": "grow", "recipe": "Grown 50% of the way from Kick toward Tom; seed 4", "sources": [], "taken": ["Grown 50% of the way from Kick toward Tom"], "name": "Grown 50% of the way from Kick toward Tom · 2" }
   ]
 }

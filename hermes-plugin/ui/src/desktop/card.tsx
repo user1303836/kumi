@@ -5,7 +5,7 @@ import type { ToolMediaRendererProps } from '@hermes/plugin-sdk'
 import { Badge, Button, Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { clean, num, signed } from '../shared/format.ts'
 import { type Audition, useKumi, usePlaying } from '../shared/hooks.ts'
@@ -331,73 +331,115 @@ function Details({ children }: { children: ReactNode }) {
   )
 }
 
+/** The width the profile's four columns need to read without breaking a word; a narrower card (the chat column beside
+ *  the map) stacks each quantity instead. */
+const PROFILE_TABLE_LEAST = 400
+
 /** A comparison against several references: per quantity, this file, the references' target with its spread, and
  *  where this file sits; then each reference with its player and what it couldn't measure. How the target is made,
  *  each reference's own numbers and which part of which file was measured sit behind "Details". The spread is never
  *  a confidence, and nothing here is a percentage. */
 function ReferenceProfile({ result, audition }: { result: ListenResult; audition: Audition }) {
   const t = useT()
+  const box = useRef<HTMLElement | null>(null)
+  const [narrow, setNarrow] = useState(false)
+  useLayoutEffect(() => {
+    const element = box.current
+    if (!element) return
+    const measure = () => setNarrow(element.clientWidth < PROFILE_TABLE_LEAST)
+    measure()
+    const resized = new ResizeObserver(measure)
+    resized.observe(element)
+    return () => resized.disconnect()
+  }, [])
   const profile = result.reference_profile
   if (!profile) return null
   const cell = { padding: '4px 6px', verticalAlign: 'top', textAlign: 'left' } as const
   const head = { ...cell, ...TYPE.caption, fontWeight: 400, color: T.muted }
   const label = { ...cell, fontWeight: 400, color: T.muted }
-  const table = { borderCollapse: 'collapse', ...TYPE.small, color: T.text, width: '100%', margin: 0 } as const
+  const table = { borderCollapse: 'collapse', ...TYPE.small, color: T.text, width: '100%', margin: 0, overflowWrap: 'normal' } as const
   const row = { borderTop: `1px solid ${T.hairline}` }
   const title = { ...TYPE.body, fontWeight: 600, color: T.text, overflowWrap: 'anywhere' } as const
   const source = windowLine(t, profile.source_window)
+  // Each quantity's words once, for the table and for the stacked rows alike.
+  const rows = profile.quantities.map(quantity => {
+    const unit = clean(quantity.unit, 30)
+    const value = (number: number | null) => (typeof number === 'number' && Number.isFinite(number) ? `${num(number, 2)} ${unit}` : '—')
+    const deviation = quantity.deviation
+    return {
+      key: quantity.quantity,
+      name: quantityName(t, quantity.quantity),
+      source: value(quantity.source),
+      sourceWhy: quantity.source === null ? reasonWords(t, quantity.source_reason, quantity.source_reason_detail, quantity.source_nyquist_hz) : '',
+      target: quantity.target ? value(quantity.target.mid) : '—',
+      spread: quantity.target ? t('listen.profile.spread', `${num(quantity.target.low, 2)} … ${value(quantity.target.high)}`) : '',
+      from: quantity.target && quantity.contributors < quantity.references ? t('listen.profile.from', quantity.contributors, quantity.references) : '',
+      targetWhy: quantity.target ? '' : reasonWords(t, quantity.target_reason),
+      difference: deviation !== null && Number.isFinite(deviation) ? `${signed(deviation, 2)} ${quantity.unit === 'LUFS' ? 'LU' : unit}` : '—',
+      sits: quantity.inside_spread === null || deviation === null ? '' : quantity.inside_spread ? t('listen.profile.inside') : deviation < 0 ? t('listen.profile.below') : t('listen.profile.above')
+    }
+  })
   return (
-    <section aria-label={t('listen.profile.title')} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <section aria-label={t('listen.profile.title')} ref={box} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <strong style={title}>{t('listen.profile.title')}</strong>
       <span style={S.muted}>{t('listen.profile.usable', profile.usable_references, profile.references)}</span>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={table}>
-          <thead>
-            <tr>
-              <th style={head} />
-              <th style={head}>{t('listen.this')}</th>
-              <th style={head}>{t('listen.profile.target')}</th>
-              <th style={head}>{t('listen.difference')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {profile.quantities.map(quantity => {
-              const unit = clean(quantity.unit, 30)
-              const value = (number: number | null) => (typeof number === 'number' && Number.isFinite(number) ? `${num(number, 2)} ${unit}` : '—')
-              const deviation = quantity.deviation
-              const sits = quantity.inside_spread === null || deviation === null ? '' : quantity.inside_spread ? t('listen.profile.inside') : deviation < 0 ? t('listen.profile.below') : t('listen.profile.above')
-              return (
-                <tr key={quantity.quantity} style={row}>
+      {narrow ? (
+        // Narrow: each quantity on its own, its name and where this file sits on the first line, the values under it.
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', ...TYPE.small, color: T.text }}>
+          {rows.map(each => (
+            <li key={each.key} style={{ ...row, display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 0' }}>
+              <span style={{ ...S.row, justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ color: T.muted }}>{each.name}</span>
+                <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {each.difference}
+                  {each.sits && <span style={S.faint}> {each.sits}</span>}
+                </span>
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {t('listen.this')} {each.source} · {t('listen.profile.target')} {each.target}
+              </span>
+              {each.sourceWhy && <span style={S.faint}>{each.sourceWhy}</span>}
+              {(each.spread || each.from || each.targetWhy) && <span style={S.faint}>{[each.spread, each.from, each.targetWhy].filter(Boolean).join(' · ')}</span>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={table}>
+            <thead>
+              <tr>
+                <th style={head} />
+                <th style={head}>{t('listen.this')}</th>
+                <th style={head}>{t('listen.profile.target')}</th>
+                <th style={head}>{t('listen.difference')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(each => (
+                <tr key={each.key} style={row}>
                   <th scope="row" style={label}>
-                    {quantityName(t, quantity.quantity)}
+                    {each.name}
                   </th>
                   <td style={cell}>
-                    {value(quantity.source)}
-                    {quantity.source === null && <div style={S.faint}>{reasonWords(t, quantity.source_reason, quantity.source_reason_detail, quantity.source_nyquist_hz)}</div>}
+                    {each.source}
+                    {each.sourceWhy && <div style={S.faint}>{each.sourceWhy}</div>}
                   </td>
                   <td style={cell}>
-                    {quantity.target ? (
-                      <>
-                        {value(quantity.target.mid)}
-                        <div style={S.faint}>{t('listen.profile.spread', `${num(quantity.target.low, 2)} … ${value(quantity.target.high)}`)}</div>
-                        {quantity.contributors < quantity.references && <div style={S.faint}>{t('listen.profile.from', quantity.contributors, quantity.references)}</div>}
-                      </>
-                    ) : (
-                      <>
-                        —<div style={S.faint}>{reasonWords(t, quantity.target_reason)}</div>
-                      </>
-                    )}
+                    {each.target}
+                    {each.spread && <div style={S.faint}>{each.spread}</div>}
+                    {each.from && <div style={S.faint}>{each.from}</div>}
+                    {each.targetWhy && <div style={S.faint}>{each.targetWhy}</div>}
                   </td>
                   <td style={cell}>
-                    {deviation !== null && Number.isFinite(deviation) ? `${signed(deviation, 2)} ${quantity.unit === 'LUFS' ? 'LU' : unit}` : '—'}
-                    {sits && <div style={S.faint}>{sits}</div>}
+                    {each.difference}
+                    {each.sits && <div style={S.faint}>{each.sits}</div>}
                   </td>
                 </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       <span style={S.faint}>{t('listen.profile.spreadNote')}</span>
       <Details>
         <span style={S.faint}>{t('listen.profile.how')}</span>
@@ -426,7 +468,12 @@ function ReferenceProfile({ result, audition }: { result: ListenResult; audition
             <strong style={title}>
               {index + 1}. {name}
             </strong>
-            {reference.artifact_id && <Wave audition={audition} id={reference.artifact_id} label={name} />}
+            {/* In a row: Wave's flex basis is a width there; in this column it was a height, a blank under each wave. */}
+            {reference.artifact_id && (
+              <div style={{ display: 'flex' }}>
+                <Wave audition={audition} caption="" id={reference.artifact_id} label={name} />
+              </div>
+            )}
             {out && <span style={S.muted}>{t('listen.profile.out', reasonWords(t, out))}</span>}
             {unavailable.size > 0 && (
               <ul aria-label={t('listen.profile.missingLabel', name)} style={{ margin: 0, paddingLeft: 16, ...S.faint }}>
@@ -526,7 +573,8 @@ export function ListenResultCard({ result, audition, fallback, store }: { result
       )}
       {view.mineId ? (
         <div style={{ ...S.row, gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          <Wave audition={audition} id={view.mineId} label={view.title} />
+          {/* Its caption tells two waves apart; alone, the card's title already names it. */}
+          <Wave audition={audition} caption={view.referenceId ? view.title : ''} id={view.mineId} label={view.title} />
           {view.referenceId && <Wave audition={audition} id={view.referenceId} label={view.referenceTitle ?? t('listen.reference')} />}
         </div>
       ) : (

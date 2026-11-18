@@ -123,9 +123,13 @@ test("a made sound is named by how it was made and from what, never its seed; Us
   const from = names => names.map((name, index) => ({ sound_id: `s-r7-${index}`, map_revision: 'r7', ...(name === null ? {} : { name }) }))
   const shared = JSON.parse(readFileSync(new URL('../../tests/made_names.json', import.meta.url), 'utf8'))
   assert.deepEqual({ ...design.MADE_WAYS }, shared.ways)
-  for (const { op, mode, recipe, sources, name } of shared.cases) {
-    assert.equal(design.resultName({ ...made, op, mode, recipe: recipe ?? made.recipe, sources: from(sources) }), name, JSON.stringify({ op, mode, sources }))
+  for (const { op, mode, recipe, sources, taken, name } of shared.cases) {
+    assert.equal(design.resultName({ ...made, op, mode, recipe: recipe ?? made.recipe, sources: from(sources) }, taken), name, JSON.stringify({ op, mode, sources, taken }))
   }
+  // Beside a palette: a kept result goes by its item's name; one not kept yet, by the name the palette would give it.
+  const kept = [{ artifact_id: made.artifact_id, name: 'Blend of 2 sounds · 2' }]
+  assert.equal(design.madeNameIn(kept, made), 'Blend of 2 sounds · 2')
+  assert.equal(design.madeNameIn([{ artifact_id: 'a-dother', name: 'Blend of 2 sounds' }], made), 'Blend of 2 sounds · 2')
   // A sound made from a made one names it as the palette does, so the next recipe never carries a seed either.
   assert.deepEqual(design.sourceOfResult({ ...made, sources: from(['Kick 02', 'Tom 4']) }), { artifact_id: made.artifact_id, name: 'Blend of Kick 02 + Tom 4' })
   assert.equal(design.useRequest({ ...made, artifact_id: 'a-d x' }), null)

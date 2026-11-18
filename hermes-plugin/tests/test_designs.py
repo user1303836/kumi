@@ -261,6 +261,11 @@ class Routes(unittest.TestCase):
                     [item] = kept.json()["palette"]["current"]["items"]
                     self.assertEqual((item["source"], item["artifact_id"], item["name"]),
                                      ("artifact", made[0], "Blend of 2 sounds"))
+        # A later variation of the same recipe kept beside it is numbered, so the two cards don't read alike.
+        again = self.client.post("/api/plugins/kumi/palette", json={"action": "gather", "artifact_ids": [made[2]]})
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertEqual([item["name"] for item in again.json()["palette"]["current"]["items"]],
+                         ["Blend of 2 sounds", "Blend of 2 sounds · 2"])
         history = [d["artifact_id"] for d in self.client.get("/api/plugins/kumi/designs").json()["designs"]]
         self.assertEqual(history, [made[4], made[3], made[2], made[0]], "the three newest, and the one the palette keeps")
         self.assertEqual(self.made(), sorted(f"{each}.wav" for each in history), "a result that goes takes its file")
@@ -308,7 +313,7 @@ class Media(unittest.TestCase):
         for case in shared["cases"]:
             sources = [{"sound_id": f"s-r7-{i:04}", **({} if name is None else {"name": name})} for i, name in enumerate(case["sources"])]
             answer = {"op": case["op"], "mode": case.get("mode"), "recipe": case.get("recipe"), "seed": 9, "sources": sources}
-            self.assertEqual(self.snapshots._design_name(answer), case["name"], case)
+            self.assertEqual(self.snapshots._design_name(answer, case.get("taken", ())), case["name"], case)
         self.assertIsNone(self.snapshots.palette_artifact(self.state, "a-d" + "B" * 22))
 
 

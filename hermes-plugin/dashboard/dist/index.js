@@ -3505,26 +3505,39 @@
     const space = cut.lastIndexOf(" ");
     return `${(space > most / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
   }
-  function resultName(result) {
-    if (result.op === "grow") return cutAtWord(quotable(result.recipe.split(/[:;]/, 1)[0] ?? "", 200), MADE_NAME_MOST) || "Grown";
+  function nameWithin(result, most) {
+    if (result.op === "grow") return cutAtWord(quotable(result.recipe.split(/[:;]/, 1)[0] ?? "", 200), most) || "Grown";
     const { way, named } = madeOf(result);
     const total = result.sources.length;
     if (named.length === 0) return total > 1 ? `${MADE_WAYS[way]} of ${total} sounds` : MADE_WAYS[way];
     const lead = `${MADE_WAYS[way]} of `;
     const rest = (shown) => total > shown ? ` + ${total - shown} more` : "";
-    const first = cutAtWord(named[0], MADE_NAME_MOST - lead.length - rest(named.length).length - (named.length > 1 ? named[1].length + 3 : 0));
+    const first = cutAtWord(named[0], most - lead.length - rest(named.length).length - (named.length > 1 ? named[1].length + 3 : 0));
     return `${lead}${first}${named.length > 1 ? ` + ${named[1]}` : ""}${rest(named.length)}`;
   }
-  function sourceOfResult(result) {
-    return { artifact_id: result.artifact_id, name: resultName(result) };
+  function resultName(result, taken = []) {
+    const plain = nameWithin(result, MADE_NAME_MOST);
+    if (!taken.includes(plain)) return plain;
+    for (let n = 2; ; n += 1) {
+      const mark = ` · ${n}`;
+      const name = `${nameWithin(result, MADE_NAME_MOST - mark.length)}${mark}`;
+      if (!taken.includes(name)) return name;
+    }
+  }
+  function madeNameIn(items, result) {
+    const own = items.find((item) => item.artifact_id === result.artifact_id);
+    return own ? own.name : resultName(result, items.map((item) => item.name));
+  }
+  function sourceOfResult(result, name = resultName(result)) {
+    return { artifact_id: result.artifact_id, name };
   }
   function stagesOf(recipe) {
     const body = recipe.includes(":") ? recipe.slice(recipe.indexOf(":") + 1) : recipe;
     const stages = body.split(/\s*(?:→|->)\s*/).map((stage) => stage.replace(/[;·].*$/, "").trim()).filter(Boolean);
     return stages.length > 1 ? stages : [];
   }
-  function useRequest(result) {
-    return artifactReference(result.artifact_id, resultName(result));
+  function useRequest(result, name = resultName(result)) {
+    return artifactReference(result.artifact_id, name);
   }
   function sourcesOf(items, revision) {
     const out = [];
@@ -5979,8 +5992,8 @@
                       children: t("make.clearChosen")
                     }
                   ),
-                  chosenJoin && /* @__PURE__ */ jsx(Button, { kind: chosenAlone ? "secondary" : "primary", onClick: () => makeFrom([...sources, ...chosenNew.map(sourceOfResult)]), tip: t("make.addToSoundsTitle"), children: t("make.addToSounds") }),
-                  chosenAlone && /* @__PURE__ */ jsx(Button, { kind: "primary", onClick: () => makeFrom(chosenResults.map(sourceOfResult)), tip: t("make.fromTheseTitle"), children: t("make.fromThese") })
+                  chosenJoin && /* @__PURE__ */ jsx(Button, { kind: chosenAlone ? "secondary" : "primary", onClick: () => makeFrom([...sources, ...chosenNew.map((result) => sourceOfResult(result))]), tip: t("make.addToSoundsTitle"), children: t("make.addToSounds") }),
+                  chosenAlone && /* @__PURE__ */ jsx(Button, { kind: "primary", onClick: () => makeFrom(chosenResults.map((result) => sourceOfResult(result))), tip: t("make.fromTheseTitle"), children: t("make.fromThese") })
                 ]
               }
             ),
@@ -10438,6 +10451,7 @@
     useWant(store, "map");
     useWant(store, "palette");
     const state = useKumi(store);
+    const madeName = (result) => madeNameIn(state.palette?.current?.items ?? [], result);
     const playing = usePlaying(audition);
     const now = useNow();
     const [selected, setSelected] = useState(null);
@@ -10589,10 +10603,10 @@
               onPlayMade: (result) => void audition.play(result.artifact_id).catch(() => {
               }),
               growActions: (result) => {
-                const request = useRequest(result);
+                const request = useRequest(result, madeName(result));
                 const kept3 = palette.kept.has(result.artifact_id);
                 return /* @__PURE__ */ jsxs(Fragment2, { children: [
-                  /* @__PURE__ */ jsx(Button, { kind: "quiet", onClick: () => palette.makeFrom([sourceOfResult(result), ...grow.to ? [grow.to.source] : []]), tip: t("make.openTitle"), children: t("make.open") }),
+                  /* @__PURE__ */ jsx(Button, { kind: "quiet", onClick: () => palette.makeFrom([sourceOfResult(result, madeName(result)), ...grow.to ? [grow.to.source] : []]), tip: t("make.openTitle"), children: t("make.open") }),
                   /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
                   /* @__PURE__ */ jsx(Button, { disabled: kept3, onClick: () => palette.keep(result), tip: kept3 ? void 0 : t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
                   request && /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyUse"), text: request })
@@ -10702,7 +10716,7 @@
             sources: palette.making,
             tempo: state.focus?.transport?.tempo,
             use: (result) => {
-              const request = useRequest(result);
+              const request = useRequest(result, madeName(result));
               return request ? /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyUse"), text: request }) : null;
             }
           }

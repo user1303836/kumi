@@ -350,7 +350,8 @@ def _palette_edit(state: Path, body: Any) -> str:
         if not sound_ids and not artifact_ids:
             raise palettes.Invalid("Gather takes sound ids or artifact ids.")
         folders = _library_folders() if artifact_ids else []
-        artifacts = [(each, snapshots.palette_artifact(state, each, folders)) for each in artifact_ids]
+        taken = palettes.names(state) if artifact_ids else ()
+        artifacts = snapshots.palette_artifacts(state, artifact_ids, folders, taken)
         if any(name is None for _, name in artifacts):
             raise palettes.Invalid("Kumi can't play that result here, so it can't go in the palette.")
         return palettes.gather(state, _palette_map(state) if sound_ids else None, sound_ids, artifacts)

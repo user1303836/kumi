@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { addFolderRequest, clean, folderExample, jobWords, liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
 import { useFirstOpen } from '../shared/atlas/first.ts'
-import { sourceOfResult, useRequest } from '../shared/design.ts'
+import { type DesignResult, madeNameIn, sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MakePanel, sideSheetWidth } from '../shared/MakePanel.tsx'
@@ -91,6 +91,8 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   useWant(store, 'map')
   useWant(store, 'palette')
   const state = useKumi(store)
+  // A made sound by the name its palette gives it (a later variation of one recipe numbered), for Use and as a source.
+  const madeName = (result: DesignResult) => madeNameIn(state.palette?.current?.items ?? [], result)
   const playing = usePlaying(audition)
   const [selected, setSelected] = useState<null | string>(null)
   // The sound whose pad picker is open: one at a time, and it closes when another sound is picked.
@@ -279,11 +281,11 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           grow={grow}
           onPlayMade={result => playMade(result.artifact_id)}
           growActions={result => {
-            const request = useRequest(result)
+            const request = useRequest(result, madeName(result))
             const kept = palette.kept.has(result.artifact_id)
             return (
               <>
-                <Button kind="quiet" onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} tip={t('make.openTitle')}>
+                <Button kind="quiet" onClick={() => palette.makeFrom([sourceOfResult(result, madeName(result)), ...(grow.to ? [grow.to.source] : [])])} tip={t('make.openTitle')}>
                   {t('make.open')}
                 </Button>
                 <span style={{ flex: 1 }} />
@@ -407,7 +409,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             sources={palette.making}
             tempo={state.focus?.transport?.tempo}
             use={result => {
-              const request = useRequest(result)
+              const request = useRequest(result, madeName(result))
               return request ? (
                 <Button onClick={() => ask(ctx, request, { send: false, session })} tip={t('make.useTitle')}>
                   {t('make.use')}
