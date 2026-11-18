@@ -1696,7 +1696,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             zIndex: 1,
             left: clusterAt.left,
             top: clusterAt.top,
-            maxWidth: `calc(100% - 16px)`,
+            // Left of a side sheet over the map (Make), as `floatBeside` places it: with no room for one line, its
+            // actions wrap rather than run under the sheet.
+            maxWidth: `calc(100% - ${coverRight}px - 16px)`,
             ...S.row,
             flexWrap: 'wrap',
             gap: 6,

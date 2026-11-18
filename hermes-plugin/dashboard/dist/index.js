@@ -3552,6 +3552,11 @@
   function sourceOfResult(result, name = resultName(result)) {
     return { artifact_id: result.artifact_id, name };
   }
+  function loopTiming(result) {
+    if (result.mode !== "loop") return null;
+    const said = /(\d+) bars? (?:of (\d+\/\d+) )?at (\d+(?:\.\d+)?) BPM/.exec(result.recipe);
+    return said ? { bars: Number(said[1]), meter: said[2] ?? "", bpm: said[3] } : null;
+  }
   function stagesOf(recipe) {
     const body = recipe.includes(":") ? recipe.slice(recipe.indexOf(":") + 1) : recipe;
     const stages = body.split(/\s*(?:→|->)\s*/).map((stage) => stage.replace(/[;·].*$/, "").trim()).filter(Boolean);
@@ -5813,6 +5818,7 @@
                   const inPalette = kept3.has(result.artifact_id);
                   const isChosen = chosen.includes(result.artifact_id);
                   const stages = result.mode === "modulate" ? stagesOf(result.recipe) : [];
+                  const timing = loopTiming(result);
                   const name = nameOf2(result);
                   return /* @__PURE__ */ jsxs(
                     "div",
@@ -5955,11 +5961,11 @@
                           ) })
                         ] }),
                         /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-                          /* @__PURE__ */ jsx(Tip, { label: `#${result.seed} · ${t("make.seedTitle")}`, children: /* @__PURE__ */ jsxs("span", { style: { ...TYPE.small, color: T.faint }, children: [
+                          /* @__PURE__ */ jsx(Tip, { label: `#${result.seed} · ${t("make.seedTitle")}`, children: /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, color: T.faint }, children: [
                             t(`make.ops.${result.mode === "loop" ? "loop" : result.op}`),
-                            " · ",
+                            ...timing ? [t("make.optionValues.bars", timing.bars), timing.meter, t("make.optionValues.bpm", timing.bpm)] : [],
                             seconds(result.duration)
-                          ] }) }),
+                          ].filter(Boolean).join(" · ") }) }),
                           /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
                           take.results.length > 1 && /* @__PURE__ */ jsxs("span", { role: "group", "aria-label": t("make.variations"), style: { ...S.row, gap: 2 }, children: [
                             /* @__PURE__ */ jsx(Button, { disabled: at === 0, kind: "quiet", label: t("make.previous"), onClick: () => setShown((current) => ({ ...current, [take.key]: at - 1 })), children: "‹" }),
@@ -9473,7 +9479,9 @@
                 zIndex: 1,
                 left: clusterAt.left,
                 top: clusterAt.top,
-                maxWidth: `calc(100% - 16px)`,
+                // Left of a side sheet over the map (Make), as `floatBeside` places it: with no room for one line, its
+                // actions wrap rather than run under the sheet.
+                maxWidth: `calc(100% - ${coverRight}px - 16px)`,
                 ...S.row,
                 flexWrap: "wrap",
                 gap: 6,

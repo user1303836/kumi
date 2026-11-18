@@ -522,6 +522,15 @@ export function sourceOfResult(result: Pick<DesignResult, 'artifact_id' | 'recip
   return { artifact_id: result.artifact_id, name }
 }
 
+/** A loop's bars, meter and tempo, as the engine's recipe says them ("Loop, 2 bars of 7/8 at 124 BPM in 16ths, …";
+ *  4/4 isn't said): what a loop's card shows on its face, since its name says only how and from what. Null for a
+ *  result that isn't a loop, or a recipe that doesn't say. */
+export function loopTiming(result: Pick<DesignResult, 'recipe' | 'mode'>): { bars: number; meter: string; bpm: string } | null {
+  if (result.mode !== 'loop') return null
+  const said = /(\d+) bars? (?:of (\d+\/\d+) )?at (\d+(?:\.\d+)?) BPM/.exec(result.recipe)
+  return said ? { bars: Number(said[1]), meter: said[2] ?? '', bpm: said[3] } : null
+}
+
 /** The stages a modulate result's recipe names ("ring by Kick 02 → low-pass filter follows Snare 4"), in order: one
  *  each, so the panel shows how the sounds were modulated. Empty for a recipe that names none. */
 export function stagesOf(recipe: string): string[] {

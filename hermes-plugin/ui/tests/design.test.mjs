@@ -65,6 +65,14 @@ test('a request carries only the choices set, each one the engine takes; an unto
   assert.deepEqual(design.growRequest(from, to, 1.4, 77, { punch: 0.5 }), { op: 'grow', sources: [from, to], seed: 77, options: { at: 1, steer: { punch: 0.5 } } })
 })
 
+test("a loop's card reads its bars, meter and tempo from the engine's words; anything else has none", () => {
+  // The engine's words for a loop (crates/kumi-design/src/fuse.rs `words`): 4/4 isn't said, another meter is.
+  assert.deepEqual(design.loopTiming(answer({ op: 'fuse', mode: 'loop', recipe: 'Loop, 2 bars at 175 BPM in 16ths, 24% swing: kick from Brush Snare 87 (E(4,16))' })), { bars: 2, meter: '', bpm: '175' })
+  assert.deepEqual(design.loopTiming(answer({ op: 'fuse', mode: 'loop', recipe: 'Loop, 1 bar of 7/8 at 124.5 BPM in triplets, 0% swing: snare from Tom 4' })), { bars: 1, meter: '7/8', bpm: '124.5' })
+  assert.equal(design.loopTiming(answer({ op: 'fuse', mode: 'loop', recipe: 'Loop of a melody' })), null, 'a recipe that says no tempo shows none')
+  assert.equal(design.loopTiming(answer()), null, 'a blend is no loop')
+})
+
 test('a surprise moves three to five steer controls a good way, inside their ranges; a modulate recipe names its stages', () => {
   let state = 7
   const random = () => ((state = (state * 1103515245 + 12345) % 2147483648) / 2147483648)
