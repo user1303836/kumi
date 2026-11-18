@@ -446,22 +446,23 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   const strip = useRef<HTMLDivElement | null>(null)
   useEdgeFade(strip, open)
   // Whether the folded row shows every sound already: then the drawer's button opens the cards, it doesn't promise
-  // "all" of what's already in view (a palette of one sound read "Show all 1").
+  // "all" of what's already in view (a palette of one sound read "Show all 1"). Measured after each render (the chips
+  // are this component's own) and when the row changes size; never a MutationObserver (rule 8).
   const [rowFits, setRowFits] = useState(false)
   useLayoutEffect(() => {
     const element = open ? null : strip.current
     if (!element) return
-    const check = () => setRowFits(element.scrollWidth <= element.clientWidth + 1)
-    check()
-    const resized = new ResizeObserver(check)
+    const fits = element.scrollWidth <= element.clientWidth + 1
+    if (fits !== rowFits) setRowFits(fits)
+  })
+  const rowShown = !open && editing !== 'new' && (order ?? current?.items ?? []).length > 0
+  useEffect(() => {
+    const element = rowShown ? strip.current : null
+    if (!element) return
+    const resized = new ResizeObserver(() => setRowFits(element.scrollWidth <= element.clientWidth + 1))
     resized.observe(element)
-    const changed = new MutationObserver(check)
-    changed.observe(element, { childList: true })
-    return () => {
-      resized.disconnect()
-      changed.disconnect()
-    }
-  }, [open, editing, (order ?? current?.items ?? []).length > 0])
+    return () => resized.disconnect()
+  }, [rowShown])
   const scrolledFor = useRef<Map<string, number> | null>(null)
   useEffect(() => {
     const element = strip.current

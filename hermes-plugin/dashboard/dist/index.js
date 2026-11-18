@@ -2779,7 +2779,20 @@
     };
   }
   function fadeEdges(element) {
+    const rows = /* @__PURE__ */ new Set();
+    const resized = new ResizeObserver(() => apply());
     const apply = () => {
+      const now = new Set(element.children);
+      for (const row of rows) {
+        if (now.has(row)) continue;
+        resized.unobserve(row);
+        rows.delete(row);
+      }
+      for (const row of now) {
+        if (rows.has(row)) continue;
+        rows.add(row);
+        resized.observe(row);
+      }
       const top = element.scrollTop > 1;
       const bottom = element.scrollTop + element.clientHeight < element.scrollHeight - 1;
       const mask = top || bottom ? `linear-gradient(to bottom, ${top ? "transparent" : "#000"}, #000 ${top ? 16 : 0}px, #000 calc(100% - ${bottom ? 16 : 0}px), ${bottom ? "transparent" : "#000"})` : "";
@@ -2788,25 +2801,27 @@
     };
     apply();
     element.addEventListener("scroll", apply, { passive: true });
-    const resized = new ResizeObserver(apply);
     resized.observe(element);
-    const changed = new MutationObserver(apply);
-    changed.observe(element, { childList: true, subtree: true, characterData: true });
-    return () => {
-      element.removeEventListener("scroll", apply);
-      resized.disconnect();
-      changed.disconnect();
-      element.style.removeProperty("mask-image");
-      element.style.removeProperty("-webkit-mask-image");
+    return {
+      apply,
+      stop: () => {
+        element.removeEventListener("scroll", apply);
+        resized.disconnect();
+        element.style.removeProperty("mask-image");
+        element.style.removeProperty("-webkit-mask-image");
+      }
     };
   }
   function useEdgeFade(ref, on = true) {
     const bound = useRef(null);
     useLayoutEffect(() => {
       const element = on ? ref.current : null;
-      if (bound.current?.element === element) return;
+      if (bound.current && bound.current.element === element) {
+        bound.current.apply();
+        return;
+      }
       bound.current?.stop();
-      bound.current = element ? { element, stop: fadeEdges(element) } : null;
+      bound.current = element ? { element, ...fadeEdges(element) } : null;
     });
     useLayoutEffect(
       () => () => {
@@ -9037,7 +9052,7 @@
     const cornerBottom = playerShown ? Math.max(110, playerHeight) + 18 : 10;
     const listOpen = matches.length > 0 && closedOf !== matches && !veiled;
     const rowsShown = Math.min(matches.length, allOf === matches ? matches.length : MATCHES_LISTED);
-    const listWants = LIST_HEAD + rowsShown * LIST_ROW + (matches.length > MATCHES_LISTED ? LIST_MORE : 0);
+    const listWants = LIST_HEAD + rowsShown * LIST_ROW + LIST_MORE;
     const freeLeast = Math.max(FREE_LEAST, size.height / 4);
     const crowded = listOpen && size.height > 0 && size.height - topInset - cornerBottom - (firstSteps.length > 0 ? CORNER_WITH_STEPS : CORNER_ROOM) - listWants < freeLeast;
     const short = size.height > 0 && size.height - topInset - cornerBottom < ROOM_LEAST;
@@ -9207,7 +9222,6 @@
                     ] }),
                     onPicked && // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
                     /* @__PURE__ */ jsx(Button, { onClick: () => onPicked(matches, "replace"), tip: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) }),
-                    /* @__PURE__ */ jsx(Button, { kind: "quiet", onClick: () => frameSounds(new Set(matches)), tip: t("map.frameTitle"), children: t("map.frame") }),
                     /* @__PURE__ */ jsx(Button, { kind: "quiet", label: t("map.closeList"), onClick: () => setClosedOf(matches), children: "×" })
                   ] }),
                   !listFolded && /* @__PURE__ */ jsx("div", { ref: matchesList, style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: listed.map((id) => {
@@ -9236,7 +9250,11 @@
                       id
                     );
                   }) }),
-                  (listFolded || matches.length > MATCHES_LISTED) && /* @__PURE__ */ jsx("span", { style: { padding: "2px 0 0 2px" }, children: /* @__PURE__ */ jsx(Button, { kind: "quiet", onClick: () => setAllOf(allOf === matches ? null : matches), children: listFolded ? t("map.showList", matches.length) : allOf === matches ? t("map.showFewer") : t("map.showMore", matches.length - MATCHES_LISTED) }) })
+                  /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6, padding: "2px 0 0 2px" }, children: [
+                    (listFolded || matches.length > MATCHES_LISTED) && /* @__PURE__ */ jsx(Button, { kind: "quiet", onClick: () => setAllOf(allOf === matches ? null : matches), children: listFolded ? t("map.showList", matches.length) : allOf === matches ? t("map.showFewer") : t("map.showMore", matches.length - MATCHES_LISTED) }),
+                    /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
+                    /* @__PURE__ */ jsx(Button, { kind: "quiet", onClick: () => frameSounds(new Set(matches)), tip: t("map.frameTitle"), children: t("map.frame") })
+                  ] })
                 ] })
               );
             })(),
@@ -9743,17 +9761,17 @@
     useLayoutEffect(() => {
       const element = open ? null : strip.current;
       if (!element) return;
-      const check = () => setRowFits(element.scrollWidth <= element.clientWidth + 1);
-      check();
-      const resized = new ResizeObserver(check);
+      const fits = element.scrollWidth <= element.clientWidth + 1;
+      if (fits !== rowFits) setRowFits(fits);
+    });
+    const rowShown = !open && editing !== "new" && (order ?? current?.items ?? []).length > 0;
+    useEffect(() => {
+      const element = rowShown ? strip.current : null;
+      if (!element) return;
+      const resized = new ResizeObserver(() => setRowFits(element.scrollWidth <= element.clientWidth + 1));
       resized.observe(element);
-      const changed = new MutationObserver(check);
-      changed.observe(element, { childList: true });
-      return () => {
-        resized.disconnect();
-        changed.disconnect();
-      };
-    }, [open, editing, (order ?? current?.items ?? []).length > 0]);
+      return () => resized.disconnect();
+    }, [rowShown]);
     const scrolledFor = useRef(null);
     useEffect(() => {
       const element = strip.current;

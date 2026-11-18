@@ -124,9 +124,25 @@ export function segmentStyle(picked: boolean, disabled = false): CSSProperties {
 }
 
 /** Fade `element`'s top and bottom edges while there's more to scroll that way, so a row cut at an edge reads as
- *  scrolling, not as a fault. It sets the element's own mask (no re-render) on scroll, resize and new content. */
-function fadeEdges(element: HTMLElement): () => void {
+ *  scrolling, not as a fault. It sets the element's own mask (no re-render): on scroll, when it or one of its rows
+ *  changes size, and at each `apply` (`useEdgeFade` calls it after every render of the scroller's owner). Never a
+ *  MutationObserver: rule 8 keeps the Desktop file free of them. */
+function fadeEdges(element: HTMLElement): { apply: () => void; stop: () => void } {
+  const rows = new Set<Element>()
+  const resized = new ResizeObserver(() => apply())
   const apply = () => {
+    // Each row is watched once (observing one again would report it anew and loop), and let go once it's gone.
+    const now = new Set(element.children)
+    for (const row of rows) {
+      if (now.has(row)) continue
+      resized.unobserve(row)
+      rows.delete(row)
+    }
+    for (const row of now) {
+      if (rows.has(row)) continue
+      rows.add(row)
+      resized.observe(row)
+    }
     const top = element.scrollTop > 1
     const bottom = element.scrollTop + element.clientHeight < element.scrollHeight - 1
     const mask = top || bottom ? `linear-gradient(to bottom, ${top ? 'transparent' : '#000'}, #000 ${top ? 16 : 0}px, #000 calc(100% - ${bottom ? 16 : 0}px), ${bottom ? 'transparent' : '#000'})` : ''
@@ -135,27 +151,30 @@ function fadeEdges(element: HTMLElement): () => void {
   }
   apply()
   element.addEventListener('scroll', apply, { passive: true })
-  const resized = new ResizeObserver(apply)
   resized.observe(element)
-  const changed = new MutationObserver(apply)
-  changed.observe(element, { childList: true, subtree: true, characterData: true })
-  return () => {
-    element.removeEventListener('scroll', apply)
-    resized.disconnect()
-    changed.disconnect()
-    element.style.removeProperty('mask-image')
-    element.style.removeProperty('-webkit-mask-image')
+  return {
+    apply,
+    stop: () => {
+      element.removeEventListener('scroll', apply)
+      resized.disconnect()
+      element.style.removeProperty('mask-image')
+      element.style.removeProperty('-webkit-mask-image')
+    }
   }
 }
 
-/** Every scroller of Kumi's fades at the edge it can still scroll to (`fadeEdges`), while `on`. */
+/** Every scroller of Kumi's fades at the edge it can still scroll to (`fadeEdges`), while `on`. After each render of
+ *  its owner it binds to the scroller shown, or measures the same one again (its rows may have changed). */
 export function useEdgeFade(ref: RefObject<HTMLElement | null>, on = true): void {
-  const bound = useRef<{ element: HTMLElement; stop: () => void } | null>(null)
+  const bound = useRef<{ element: HTMLElement; apply: () => void; stop: () => void } | null>(null)
   useLayoutEffect(() => {
     const element = on ? ref.current : null
-    if (bound.current?.element === element) return
+    if (bound.current && bound.current.element === element) {
+      bound.current.apply()
+      return
+    }
     bound.current?.stop()
-    bound.current = element ? { element, stop: fadeEdges(element) } : null
+    bound.current = element ? { element, ...fadeEdges(element) } : null
   })
   useLayoutEffect(
     () => () => {

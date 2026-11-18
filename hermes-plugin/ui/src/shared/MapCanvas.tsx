@@ -1234,7 +1234,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const cornerBottom = playerShown ? Math.max(110, playerHeight) + 18 : 10
   const listOpen = matches.length > 0 && closedOf !== matches && !veiled
   const rowsShown = Math.min(matches.length, allOf === matches ? matches.length : MATCHES_LISTED)
-  const listWants = LIST_HEAD + rowsShown * LIST_ROW + (matches.length > MATCHES_LISTED ? LIST_MORE : 0)
+  const listWants = LIST_HEAD + rowsShown * LIST_ROW + LIST_MORE
   const freeLeast = Math.max(FREE_LEAST, size.height / 4)
   const crowded = listOpen && size.height > 0 && size.height - topInset - cornerBottom - (firstSteps.length > 0 ? CORNER_WITH_STEPS : CORNER_ROOM) - listWants < freeLeast
   const short = size.height > 0 && size.height - topInset - cornerBottom < ROOM_LEAST
@@ -1462,11 +1462,6 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
                       {t('dock.pickAll', matches.length)}
                     </Button>
                   )}
-                  {/* The sounds listed may lie out of view (a search typed while zoomed in): this brings them all into
-                      the room the map shows, as a find's frame does, only when asked. */}
-                  <Button kind="quiet" onClick={() => frameSounds(new Set(matches))} tip={t('map.frameTitle')}>
-                    {t('map.frame')}
-                  </Button>
                   <Button kind="quiet" label={t('map.closeList')} onClick={() => setClosedOf(matches)}>
                     ×
                   </Button>
@@ -1503,13 +1498,20 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
                     })}
                   </div>
                 )}
-                {(listFolded || matches.length > MATCHES_LISTED) && (
-                  <span style={{ padding: '2px 0 0 2px' }}>
+                {/* The foot: the rest of the list, and a way to bring every sound listed into the room the map shows
+                    (a search typed while zoomed in may light them out of view), only when asked, as a find's frame
+                    does. Down here the head keeps the room to read whole. */}
+                <span style={{ ...S.row, gap: 6, padding: '2px 0 0 2px' }}>
+                  {(listFolded || matches.length > MATCHES_LISTED) && (
                     <Button kind="quiet" onClick={() => setAllOf(allOf === matches ? null : matches)}>
                       {listFolded ? t('map.showList', matches.length) : allOf === matches ? t('map.showFewer') : t('map.showMore', matches.length - MATCHES_LISTED)}
                     </Button>
-                  </span>
-                )}
+                  )}
+                  <span style={{ flex: 1 }} />
+                  <Button kind="quiet" onClick={() => frameSounds(new Set(matches))} tip={t('map.frameTitle')}>
+                    {t('map.frame')}
+                  </Button>
+                </span>
               </div>
             )
           })()}
