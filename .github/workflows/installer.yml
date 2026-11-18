@@ -72,6 +72,13 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
       # What's published: every run builds with the release profile (the nightly's keeps its cache warm for the next tag).
       PROFILE: release
+      # The workspace's crates from sccache's store in the Actions cache, as CI's Rust parts have them (the step that
+      # compiles sets RUSTC_WRAPPER: rust-cache keys its cache on RUST* variables). The nightly and runs by hand write
+      # it; a tag only reads (a tag's own cache can't be read by later tags), so a release compiles only what changed
+      # since the night before. The programs themselves (each binary's link and thin LTO) aren't cacheable, and their
+      # bytes don't change: sccache hands back the same library rustc made.
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.event_name == 'push' && 'READ_ONLY' || 'READ_WRITE' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -88,6 +95,9 @@ jobs:
         with:
           key: ${{ env.PROFILE }}-${{ matrix.target }}
           save-if: ${{ github.event_name == 'schedule' }}
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.18.0
       # Only the Mac bundles carry the helper Kumi uses Live's menus with; each Mac job builds it (universal, under
       # a minute) instead of waiting for a job of its own.
       - name: Build Kumi's Mac helper
@@ -95,6 +105,8 @@ jobs:
         run: python3 scripts/build-hands.py
       - name: Build and bind the release artifacts
         shell: bash
+        env:
+          RUSTC_WRAPPER: sccache
         run: python3 scripts/build-native-release.py --target '${{ matrix.target }}' --profile "$PROFILE" --out release
       - name: Each Mac binary is built for its target's architecture
         if: runner.os == 'macOS'
