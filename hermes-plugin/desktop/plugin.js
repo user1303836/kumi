@@ -6669,23 +6669,58 @@ function peaksOf2(samples, bins) {
 
 // src/shared/peaks.ts
 var DECODE_MOST = 12 * 1024 * 1024;
+var FINE_BARS = 2240;
+var KEPT_SOUNDS = 1024;
 var kept = /* @__PURE__ */ new Map();
 var loading = /* @__PURE__ */ new Map();
 var askers = /* @__PURE__ */ new Map();
 var queue = Promise.resolve();
 var SKIPPED = /* @__PURE__ */ Symbol("skipped");
-function peaksFor(id, bars, audio, wanted = () => true) {
-  const key = `${bars}:${id}`;
-  const done = kept.get(key);
-  if (done !== void 0) return Promise.resolve(done);
-  const running = loading.get(key);
-  if (running) {
-    askers.get(key)?.push(wanted);
-    return running;
+function poolPeaks(fine, bars) {
+  const out = new Array(Math.max(0, bars)).fill(0);
+  if (fine.length === 0 || bars <= 0) return out;
+  let loudest = 0;
+  for (let bar = 0; bar < bars; bar++) {
+    const start = Math.floor(bar * fine.length / bars);
+    const end = Math.max(start + 1, Math.floor((bar + 1) * fine.length / bars));
+    let peak = 0;
+    for (let at = start; at < end && at < fine.length; at++) if (fine[at] > peak) peak = fine[at];
+    out[bar] = peak;
+    if (peak > loudest) loudest = peak;
   }
-  askers.set(key, [wanted]);
+  return loudest > 0 ? out.map((peak) => peak / loudest) : out;
+}
+function sized(id, bars) {
+  const entry = kept.get(id);
+  if (!entry) return void 0;
+  kept.delete(id);
+  kept.set(id, entry);
+  if (!entry.fine) return null;
+  let peaks = entry.sizes.get(bars);
+  if (!peaks) {
+    peaks = poolPeaks(entry.fine, bars);
+    entry.sizes.set(bars, peaks);
+  }
+  return peaks;
+}
+function keep(id, fine) {
+  kept.set(id, { fine, sizes: /* @__PURE__ */ new Map() });
+  if (kept.size > KEPT_SOUNDS) {
+    const oldest = kept.keys().next().value;
+    if (oldest !== void 0) kept.delete(oldest);
+  }
+}
+function peaksFor(id, bars, audio, wanted = () => true) {
+  const done = sized(id, bars);
+  if (done !== void 0) return Promise.resolve(done);
+  const running = loading.get(id);
+  if (running) {
+    askers.get(id)?.push(wanted);
+    return running.then(() => sized(id, bars) ?? null);
+  }
+  askers.set(id, [wanted]);
   const run = async () => {
-    if (!(askers.get(key) ?? []).some((ask2) => ask2())) return SKIPPED;
+    if (!(askers.get(id) ?? []).some((ask2) => ask2())) return SKIPPED;
     const url = await audio(id);
     const comma = url.indexOf(",");
     if (comma < 0 || url.length > DECODE_MOST || typeof OfflineAudioContext !== "function") return null;
@@ -6698,21 +6733,19 @@ function peaksFor(id, bars, audio, wanted = () => true) {
       const data = buffer.getChannelData(channel);
       for (let at = 0; at < data.length; at++) mixed2[at] += data[at];
     }
-    return peaksOf2(mixed2, bars);
+    return peaksOf2(mixed2, FINE_BARS);
   };
-  const promise = queue.then(run, run).catch(() => null).then((peaks) => {
-    loading.delete(key);
-    askers.delete(key);
-    if (peaks === SKIPPED) return null;
-    kept.set(key, peaks);
-    return peaks;
+  const promise = queue.then(run, run).catch(() => null).then((fine) => {
+    loading.delete(id);
+    askers.delete(id);
+    if (fine !== SKIPPED) keep(id, fine);
   });
   queue = promise;
-  loading.set(key, promise);
-  return promise;
+  loading.set(id, promise);
+  return promise.then(() => sized(id, bars) ?? null);
 }
 function peaksKept(id, bars) {
-  return kept.get(`${bars}:${id}`) ?? null;
+  return sized(id, bars) ?? null;
 }
 
 // src/shared/mapModel.ts
@@ -7829,14 +7862,14 @@ function blur(from, into, side, radius, step2) {
     }
   }
 }
-function nebulaField(points, keep, colorOf2, side = NEBULA_SIDE) {
+function nebulaField(points, keep2, colorOf2, side = NEBULA_SIDE) {
   const cells = side * side;
   const sums = [new Float32Array(cells), new Float32Array(cells), new Float32Array(cells), new Float32Array(cells)];
   const [red, green, blue, weight] = sums;
   const span2 = side / (1 + 2 * NEBULA_PAD);
   const colors = /* @__PURE__ */ new Map();
   for (let index = 0; index < points.length; index++) {
-    if (!keep(index)) continue;
+    if (!keep2(index)) continue;
     const point = points[index];
     let color = colors.get(point.group);
     if (!color) {
@@ -8875,8 +8908,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return out;
   }, [model, hidden, searched, leaving]);
   const visible = useMemo2(() => (index) => mask[index] === 1, [mask]);
-  const shown = useMemo2(() => mask.reduce((count2, keep) => count2 + (keep === 1 ? 1 : 0), 0), [mask]);
-  const leavingCount = useMemo2(() => mask.reduce((count2, keep) => count2 + (keep === 2 ? 1 : 0), 0), [mask]);
+  const shown = useMemo2(() => mask.reduce((count2, keep2) => count2 + (keep2 === 1 ? 1 : 0), 0), [mask]);
+  const leavingCount = useMemo2(() => mask.reduce((count2, keep2) => count2 + (keep2 === 2 ? 1 : 0), 0), [mask]);
   const still = useMemo2(() => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches, []);
   const leftAt = useRef13(/* @__PURE__ */ new Map());
   const introAt = useRef13(-Infinity);
