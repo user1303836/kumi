@@ -1441,8 +1441,10 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             const closeness = listed.map(id => found?.matches?.[id]?.closeness).filter((value): value is number => typeof value === 'number')
             const [low, high] = closeness.length ? [Math.min(...closeness), Math.max(...closeness)] : [0, 0]
             const flat = near && closeness.length === listed.length && closeness.length > 0 && high - low <= 2
-            // The kind alone (the head speaks for every row), and a range that never breaks between its two ends.
-            const facts = [oneKind, ...sharedWhy.map(why => clean(why, 60)), near && closeness.length ? (flat ? t('map.closeness', low === high ? String(low) : `${low}\u2060–\u2060${high}`) : t('map.closenessShown')) : '']
+            // The kind alone (the head speaks for every row). The range's ends sit either side of a plain en dash: an
+            // invisible joiner there would reach the bundle as the character itself, which Hermes's install scan
+            // flags (a caution that blocks a git install).
+            const facts = [oneKind, ...sharedWhy.map(why => clean(why, 60)), near && closeness.length ? (flat ? t('map.closeness', low === high ? String(low) : `${low}–${high}`) : t('map.closenessShown')) : '']
               .filter(Boolean)
               .join(' · ')
             return (

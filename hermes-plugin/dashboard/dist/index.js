@@ -9253,7 +9253,7 @@
               const closeness = listed.map((id) => found?.matches?.[id]?.closeness).filter((value) => typeof value === "number");
               const [low, high] = closeness.length ? [Math.min(...closeness), Math.max(...closeness)] : [0, 0];
               const flat = near && closeness.length === listed.length && closeness.length > 0 && high - low <= 2;
-              const facts = [oneKind, ...sharedWhy.map((why) => clean(why, 60)), near && closeness.length ? flat ? t("map.closeness", low === high ? String(low) : `${low}⁠–⁠${high}`) : t("map.closenessShown") : ""].filter(Boolean).join(" · ");
+              const facts = [oneKind, ...sharedWhy.map((why) => clean(why, 60)), near && closeness.length ? flat ? t("map.closeness", low === high ? String(low) : `${low}–${high}`) : t("map.closenessShown") : ""].filter(Boolean).join(" · ");
               return (
                 // At most the room between the legend and the foot (the corner, the player, the picks' actions docked
                 // there): its rows scroll inside it rather than running under them, and with no room for a row it folds

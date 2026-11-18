@@ -470,8 +470,8 @@ test('what the agent found, or a search, is also listed by name above the map, f
   // What every row would repeat is said once, in the head: one kind, a reason they all share, and closeness all
   // within two points; the rows then carry no number and no kind.
   const close = draw({ ...nearFind, matches: { [ids[0]]: { why: ['near the seed'], closeness: 100 }, [ids[1]]: { why: ['near the seed'], closeness: 99 } } })
-  // The kind alone (the head speaks for every row), and the range held together across a line's end.
-  assert.ok(close.includes(`snare · near the seed · ${english('map.closeness', '99\u2060–\u2060100')}`), close)
+  // The kind alone (the head speaks for every row), and the range with a plain en dash: no invisible character.
+  assert.ok(close.includes(`snare · near the seed · ${english('map.closeness', '99–100')}`), close)
   assert.ok(!close.includes('>100<') && !close.includes('>99<') && rows(close).split('>snare<').length === 1, close)
   // "More like these": several seeds, the first named and the rest counted.
   assert.ok(draw({ ...nearFind, near: ['s-r7-0099', ids[7]] }).includes(english('map.nearMany', 'Kick 1.wav', 1)))
