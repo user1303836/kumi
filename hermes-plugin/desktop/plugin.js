@@ -7713,7 +7713,7 @@ function Corner({
             t("corner.families", families)
           ] }),
           layout,
-          /* @__PURE__ */ jsxs15("span", { style: caps, title: t("corner.zoom"), children: [
+          zoom !== void 0 && /* @__PURE__ */ jsxs15("span", { style: caps, title: t("corner.zoom"), children: [
             Math.round(zoom * 100),
             "%"
           ] })
@@ -8714,6 +8714,7 @@ function Player({
 // src/shared/MapCanvas.tsx
 import { jsx as jsx25, jsxs as jsxs22 } from "react/jsx-runtime";
 var MATCHES_LISTED = 6;
+var CORNER_ZOOM_ROOM = 480;
 var FADE_MS2 = 450;
 var INTRO_MS = 900;
 var MORPH_MS = 760;
@@ -8831,6 +8832,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const [cornerHeight, setCornerHeight] = useState14(0);
   const overlayFollow = useRef13(null);
   const [topInset, setTopInset] = useState14(0);
+  const [columnBottom, setColumnBottom] = useState14(0);
   const mapSize = mapSide(size.width, size.height, topInset);
   const fit = () => fitView(size.width, size.height, topInset, coverRight);
   const hasPoints = model.points.length > 0;
@@ -8991,6 +8993,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const observer = new ResizeObserver(() => {
       const legend = legendRef.current;
       setTopInset(legend ? Math.ceil(8 + legend.offsetTop + legend.offsetHeight + 8) : 0);
+      setColumnBottom(Math.ceil(8 + top.offsetHeight + 8));
     });
     observer.observe(top);
     return () => observer.disconnect();
@@ -9548,7 +9551,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const countWords = shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0));
   const hiddenCount = (map?.hidden ?? 0) + leavingCount;
   const foot = (chosen ? 120 : 10) + (cornerHeight > 0 ? cornerHeight + 8 : 0);
-  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, foot);
+  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, matches.length > 0 ? Math.max(topInset, columnBottom) : topInset, foot);
   clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null;
   return /* @__PURE__ */ jsxs22(
     "div",
@@ -9570,7 +9573,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
                   className: FOCUSABLE,
                   onChange: (event) => setQuery(event.target.value),
                   placeholder: t("map.searchHint"),
-                  style: { flex: 1, minWidth: 0, height: "100%", font: "inherit", fontSize: 12.5, padding: "0 12px", paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: "none", background: "transparent", color: T.text, outlineOffset: -2 },
+                  style: { flex: 1, minWidth: 0, height: "100%", font: "inherit", fontSize: 12.5, padding: "0 12px", paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: "none", background: "transparent", color: T.text, outlineOffset: -2, textOverflow: "ellipsis" },
                   value: query
                 }
               ),
@@ -9636,37 +9639,41 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
               group.key
             );
           }) }),
-          matches.length > 0 && /* @__PURE__ */ jsxs22("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), ref: matchesRef, role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: `min(340px, calc(100% - ${coverRight}px))`, pointerEvents: "auto" }, children: [
+          matches.length > 0 && // At most the room between the legend and the corner (the player too, when it's open): in a short map its list
+          // scrolls inside it rather than running under the corner.
+          /* @__PURE__ */ jsxs22("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), ref: matchesRef, role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: Math.max(120, size.height - topInset - foot), pointerEvents: "auto" }, children: [
             /* @__PURE__ */ jsxs22("div", { style: { ...S.row, gap: 6, padding: "0 4px 4px" }, children: [
               /* @__PURE__ */ jsx25("span", { style: { ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }, children: searched ? t("map.matches") : nearName || t("map.found") }),
               onPicked && // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
               /* @__PURE__ */ jsx25(TextButton, { onClick: () => onPicked(matches, "replace"), title: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) })
             ] }),
-            matches.slice(0, MATCHES_LISTED).map((id) => {
-              const sound = model.sounds[id];
-              const indexed = indexedValues(sound, t);
-              const reasons = searched ? "" : foundLine(found?.matches?.[id], nearName !== "", t);
-              return /* @__PURE__ */ jsxs22(
-                "button",
-                {
-                  "aria-pressed": selected === id,
-                  className: FOCUSABLE,
-                  onClick: () => onPick(id),
-                  type: "button",
-                  style: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0, font: "inherit", fontSize: 11.5, padding: "2px 6px", borderRadius: 6, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
-                  children: [
-                    /* @__PURE__ */ jsxs22("span", { style: { ...S.row, gap: 6 }, children: [
-                      /* @__PURE__ */ jsx25("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
-                      indexed && /* @__PURE__ */ jsx25("span", { style: { color: T.faint, whiteSpace: "nowrap" }, title: t("map.indexedTitle"), children: t("map.indexed", indexed) }),
-                      sound?.class && /* @__PURE__ */ jsx25("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
-                    ] }),
-                    reasons && /* @__PURE__ */ jsx25("span", { style: { ...S.ellipsis, color: T.faint, fontSize: 10.5 }, title: nearName ? t("map.closenessTitle") : void 0, children: reasons })
-                  ]
-                },
-                id
-              );
-            }),
-            matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx25("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
+            /* @__PURE__ */ jsxs22("div", { style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: [
+              matches.slice(0, MATCHES_LISTED).map((id) => {
+                const sound = model.sounds[id];
+                const indexed = indexedValues(sound, t);
+                const reasons = searched ? "" : foundLine(found?.matches?.[id], nearName !== "", t);
+                return /* @__PURE__ */ jsxs22(
+                  "button",
+                  {
+                    "aria-pressed": selected === id,
+                    className: FOCUSABLE,
+                    onClick: () => onPick(id),
+                    type: "button",
+                    style: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0, font: "inherit", fontSize: 11.5, padding: "2px 6px", borderRadius: 6, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
+                    children: [
+                      /* @__PURE__ */ jsxs22("span", { style: { ...S.row, gap: 6 }, children: [
+                        /* @__PURE__ */ jsx25("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
+                        indexed && /* @__PURE__ */ jsx25("span", { style: { color: T.faint, whiteSpace: "nowrap" }, title: t("map.indexedTitle"), children: t("map.indexed", indexed) }),
+                        sound?.class && /* @__PURE__ */ jsx25("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
+                      ] }),
+                      reasons && /* @__PURE__ */ jsx25("span", { style: { ...S.ellipsis, color: T.faint, fontSize: 10.5 }, title: nearName ? t("map.closenessTitle") : void 0, children: reasons })
+                    ]
+                  },
+                  id
+                );
+              }),
+              matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx25("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
+            ] })
           ] }),
           hiddenCount > 0 && // One quiet line for every sound that couldn't play here, never a notice per sound.
           /* @__PURE__ */ jsxs22("div", { role: "status", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 6, padding: "3px 6px 3px 10px", pointerEvents: "auto", maxWidth: `calc(100% - ${coverRight}px)` }, children: [
@@ -9844,7 +9851,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
               /* @__PURE__ */ jsx25(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
             ] }) : void 0,
             sounds: countWords,
-            zoom: view?.scale ?? 1
+            zoom: size.width - coverRight >= CORNER_ZOOM_ROOM ? view?.scale ?? 1 : void 0
           }
         )
       ]

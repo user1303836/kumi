@@ -97,6 +97,9 @@ export interface MapCanvasProps {
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
 const MATCHES_LISTED = 6
+/** How wide the map's free room must be for the corner's first line to hold the zoom too (the count, the layout's
+ *  button and the zoom at 11 px); narrower, the zoom is left out rather than wrapped onto a line of its own. */
+const CORNER_ZOOM_ROOM = 480
 /** How long a sound that couldn't play takes to fade off the map. */
 const FADE_MS = 450
 // The map's motion, all of it short and none of it while the map sits still: a new map's points pop in from the
@@ -265,6 +268,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // What the overlay hands back to be called after each paint: what stands still on it follows the map.
   const overlayFollow = useRef<(() => void) | null>(null)
   const [topInset, setTopInset] = useState(0)
+  // Where everything floating over the map's top ends (a find's card included): what floats beside the picks keeps below it.
+  const [columnBottom, setColumnBottom] = useState(0)
   const mapSize = mapSide(size.width, size.height, topInset)
   const fit = () => fitView(size.width, size.height, topInset, coverRight)
   // The canvas exists only once the map has points: the effects that attach to it wait for that.
@@ -463,6 +468,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const observer = new ResizeObserver(() => {
       const legend = legendRef.current
       setTopInset(legend ? Math.ceil(8 + legend.offsetTop + legend.offsetHeight + 8) : 0)
+      setColumnBottom(Math.ceil(8 + top.offsetHeight + 8))
     })
     observer.observe(top)
     return () => observer.disconnect()
@@ -1136,7 +1142,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // The picks' actions float beside the picks, never over them; with the picks out of view, at the map's foot: above
   // the corner, and above the player when there is one. Grow's card docks there too.
   const foot = (chosen ? 120 : 10) + (cornerHeight > 0 ? cornerHeight + 8 : 0)
-  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, foot)
+  // A find's card is in the top column, so with one open the picks' actions keep below the whole column, not just the legend.
+  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, matches.length > 0 ? Math.max(topInset, columnBottom) : topInset, foot)
   clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null
 
   return (
@@ -1164,7 +1171,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               className={FOCUSABLE}
               onChange={event => setQuery(event.target.value)}
               placeholder={t('map.searchHint')}
-              style={{ flex: 1, minWidth: 0, height: '100%', font: 'inherit', fontSize: 12.5, padding: '0 12px', paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: 'none', background: 'transparent', color: T.text, outlineOffset: -2 }}
+              style={{ flex: 1, minWidth: 0, height: '100%', font: 'inherit', fontSize: 12.5, padding: '0 12px', paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: 'none', background: 'transparent', color: T.text, outlineOffset: -2, textOverflow: 'ellipsis' }}
               value={query}
             />
             <span
@@ -1230,7 +1237,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           })}
         </div>
         {matches.length > 0 && (
-          <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} ref={matchesRef} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 6px 6px', width: `min(340px, calc(100% - ${coverRight}px))`, pointerEvents: 'auto' }}>
+          // At most the room between the legend and the corner (the player too, when it's open): in a short map its list
+          // scrolls inside it rather than running under the corner.
+          <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} ref={matchesRef} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 6px 6px', width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: Math.max(120, size.height - topInset - foot), pointerEvents: 'auto' }}>
             <div style={{ ...S.row, gap: 6, padding: '0 4px 4px' }}>
               {/* CC-23: a near search's neighbours, under the seeds' names from this map (the seeds themselves aren't listed). */}
               <span style={{ ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }}>{searched ? t('map.matches') : nearName || t('map.found')}</span>
@@ -1241,6 +1250,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
                 </TextButton>
               )}
             </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0, overflowY: 'auto' }}>
             {matches.slice(0, MATCHES_LISTED).map(id => {
               const sound = model.sounds[id]
               const indexed = indexedValues(sound, t)
@@ -1273,6 +1283,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               )
             })}
             {matches.length > MATCHES_LISTED && <span style={{ ...S.faint, padding: '0 6px' }}>{t('map.more', matches.length - MATCHES_LISTED)}</span>}
+            </div>
           </div>
         )}
         {hiddenCount > 0 && (
@@ -1465,7 +1476,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           ) : undefined
         }
         sounds={countWords}
-        zoom={view?.scale ?? 1}
+        // The zoom is the line's least needed word: a narrow map drops it rather than give it a line of its own.
+        zoom={size.width - coverRight >= CORNER_ZOOM_ROOM ? (view?.scale ?? 1) : undefined}
       />
     </div>
   )
