@@ -42,24 +42,67 @@ interface PaneProps {
   onOpenMeasurements: () => void
 }
 
+/** The least of the pane worth laying its content out in when Desktop runs Kumi's column past the window's edge (145
+ *  px of 240 at a 900 px window with the map open beside the chat): under 8rem on screen nothing reads, and the content
+ *  keeps the pane's width. */
+const LEAST_ON_SCREEN = 128
+/** Every hundredth of the pane coming into or going out of view: the observer then sees the window's edge move. */
+const STEPS = Array.from({ length: 101 }, (_, step) => step / 100)
+/** How often the pane looks again whether Desktop hides it: a pane behind another tab of its column (Files in front)
+ *  keeps its box and is hidden with `visibility` and `opacity` on a parent, which no observer reports. */
+const LOOK_AGAIN_MS = 1000
+
+/** Whether nothing hides the element: `display`, `visibility` or `opacity` on it or a parent. */
+const unhidden = (element: Element) => typeof element.checkVisibility !== 'function' || element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+
 /** Kumi's pane, telling `onShown` whether it's in view. Desktop's own `paneVisibility('kumi:pane')` reads false while
  *  the pane shows (it's stacked with Desktop's hidden Review pane, whose id stays the group's active one), so Kumi
- *  watches its own root instead: off screen, hidden by Desktop or gone, it's out of view. */
+ *  watches its own root instead: off screen, hidden by Desktop, behind another tab of its column, or gone, it's out of
+ *  view. The same watch keeps the pane's content in the part of it that's on screen: in a narrow window Desktop can
+ *  run Kumi's column past the window's edge (P8: 95 px at 900 px with the map open beside the chat), and the right of
+ *  every row, Undo with it, would be cut off. */
 export function KumiPane({ onShown, ...props }: PaneProps & { onShown?: (shown: boolean) => void }) {
   const root = useRef<HTMLDivElement | null>(null)
+  const [cut, setCut] = useState({ left: 0, right: 0 })
   useEffect(() => {
     const element = root.current
-    if (!element || !onShown) return
-    const seen = new IntersectionObserver(entries => onShown(entries.some(entry => entry.isIntersecting)))
+    if (!element) return
+    let intersecting = false
+    let said: boolean | null = null
+    const say = () => {
+      const shown = intersecting && unhidden(element)
+      if (shown === said) return
+      said = shown
+      onShown?.(shown)
+    }
+    const seen = new IntersectionObserver(
+      entries => {
+        const entry = entries[entries.length - 1]
+        if (!entry) return
+        intersecting = entry.isIntersecting
+        say()
+        const box = entry.boundingClientRect
+        const shown = entry.intersectionRect
+        const left = entry.isIntersecting ? Math.max(0, Math.round(shown.left - box.left)) : 0
+        const right = entry.isIntersecting ? Math.max(0, Math.round(box.right - shown.right)) : 0
+        const next = box.width - left - right < LEAST_ON_SCREEN ? { left: 0, right: 0 } : { left, right }
+        setCut(current => (current.left === next.left && current.right === next.right ? current : next))
+      },
+      { threshold: STEPS }
+    )
     seen.observe(element)
+    const timer = setInterval(say, LOOK_AGAIN_MS)
     return () => {
       seen.disconnect()
-      onShown(false)
+      clearInterval(timer)
+      onShown?.(false)
     }
   }, [onShown])
   return (
     <div ref={root} style={{ height: '100%' }}>
-      <PaneBody {...props} />
+      <div style={{ height: '100%', marginLeft: cut.left, marginRight: cut.right }}>
+        <PaneBody {...props} />
+      </div>
     </div>
   )
 }

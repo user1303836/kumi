@@ -1,11 +1,10 @@
 // A script's code as it will run (CC-19): every line, numbered, in a scrolling block. Serve and the plugin refuse
 // code with control, bidi or zero-width characters (CC-19 r7, "Trojan Source"); as a second layer, any that got
 // through is drawn where it is, as its code point, so the code can't read differently here than it runs.
-import { Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 
-import { FOCUSABLE, TYPE, useT } from './ui.tsx'
+import { FOCUSABLE, TYPE } from './ui.tsx'
 
 // Control characters other than tab, bidi controls and marks, and zero-width or invisible ones.
 const INVISIBLE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/
@@ -32,13 +31,15 @@ export function visibleLine(line: string): ReactNode[] {
   return parts
 }
 
-export function CodeBlock({ code, label }: { code: string; label: string }) {
-  const t = useT()
+/** The code, every line numbered, in a region the keyboard can scroll. `caption` is said above it, always in view: a
+ *  tooltip shows at once and would float over the code a producer is reading to approve it. */
+export function CodeBlock({ code, label, caption }: { code: string; label: string; caption?: string }) {
   const lines = code.split(/\r?\n/)
   if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
   return (
-    // Focusable, so the keyboard can scroll it (and its hint shows on that focus too).
-    <Tip label={t('script.codeTitle')}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {caption && <span style={{ ...TYPE.caption, color: T.faint }}>{caption}</span>}
+      {/* Focusable, so the keyboard can scroll it. */}
       <div
         aria-label={label}
         className={FOCUSABLE}
@@ -57,6 +58,6 @@ export function CodeBlock({ code, label }: { code: string; label: string }) {
           ))}
         </pre>
       </div>
-    </Tip>
+    </div>
   )
 }

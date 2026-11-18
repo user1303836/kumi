@@ -49,19 +49,18 @@ export const POLL_MS = 5000
 export const IDLE_POLLS = 6
 /** How often a running job is read while the window is in view (none is read when nothing runs). */
 export const JOB_POLL_MS = 2000
-/** The narrowest window where a tab of Kumi's opens beside the chat by itself: Hermes's sessions sidebar (237 px) + the
- *  chat (320) + the tab (320) + Kumi's pane at its width (320). Hermes splits what's left after the sidebar and the
- *  pane evenly between the chat and the tab, so at this width each gets about 320 px. Narrower, a find or a measurement
- *  holds its tab back and Kumi's pane offers it at its top (`KumiState.waiting`), for the producer to open. */
+/** The narrowest window with room for a tab of Kumi's beside both the chat and Kumi's pane: Hermes's sessions sidebar
+ *  (237 px) + the chat (320) + the tab (320) + Kumi's pane at its width (320). Hermes splits what's left after the
+ *  sidebar and the pane evenly between the chat and the tab, so at this width each gets about 320 px. Narrower, while
+ *  Kumi's pane is in view, a find or a measurement holds its tab back and the pane offers it at its top
+ *  (`KumiState.waiting`); with the pane out of view the tab opens as it always has. */
 export const ROOM_BESIDE_LEAST = 237 + 320 + 320 + 320
-/** What Kumi's pane takes of that, when it shows: hidden, it takes no room and the tab fits beside the chat from 877. */
-export const PANE_ROOM = 320
 
-/** Whether this window has room for a tab of Kumi's beside the chat (`ROOM_BESIDE_LEAST`), counting Kumi's pane only
- *  while it shows. It reads the window Kumi's own UI is drawn in, never Hermes's markup. */
-export function roomBeside(paneShown = true): boolean {
+/** Whether this window has room for a tab of Kumi's beside the chat and Kumi's pane (`ROOM_BESIDE_LEAST`). It reads
+ *  the window Kumi's own UI is drawn in, never Hermes's markup. */
+export function roomBeside(): boolean {
   const width = globalThis.innerWidth
-  return typeof width !== 'number' || width >= ROOM_BESIDE_LEAST - (paneShown ? 0 : PANE_ROOM)
+  return typeof width !== 'number' || width >= ROOM_BESIDE_LEAST
 }
 
 // Desktop's translator for this plugin's catalogs, reactive to a language switch; English on a Desktop without it.
@@ -107,15 +106,28 @@ const plugin: HermesPlugin = {
       </WithT>
     )
 
-    // Whether Kumi's pane is in view, as the pane itself reports it (`KumiPane`'s `onShown`; shown until it says): a
-    // hidden pane takes no room beside the chat (`roomBeside`), and with neither it nor a tab of Kumi's in view the
-    // status poll slows (X9). Desktop's own `paneVisibility('kumi:pane')` reads false while the pane shows, since Kumi's
-    // pane is stacked with Desktop's hidden Review pane, whose id stays the group's active one (`isPaneVisible`).
-    let paneInView = true
+    // Whether Kumi's pane is in view, as the pane itself reports it (`KumiPane`'s `onShown`; out of view until it says
+    // so). With neither it nor a tab of Kumi's in view the status poll slows (X9). Desktop's own
+    // `paneVisibility('kumi:pane')` reads false while the pane shows, since Kumi's pane is stacked with Desktop's hidden
+    // Review pane, whose id stays the group's active one (`isPaneVisible`).
+    let paneInView = false
+    let disposed = false
+    // A tab is held back only while the pane is in view and the window has no room beside it (P8): the pane then takes
+    // its column, and the held tab is on screen at the pane's top. Anywhere else the tab opens as it always has, and
+    // the pane leaving view (its column closed, Files in front, a window under 640 px) opens what it held. The opening
+    // waits a turn, so a pane unmounted with the plugin opens nothing (`ctx`'s timers go with it).
+    const holdBack = () => paneInView && !roomBeside()
     const notePane = (shown: boolean) => {
+      if (shown === paneInView) return
       paneInView = shown
+      if (shown) return
+      ctx.setTimeout(() => {
+        if (paneInView || disposed) return
+        const held = store.get().waiting
+        if (held?.tab === 'map') openMap()
+        else if (held?.tab === 'measurements') openMeasurements()
+      }, 0)
     }
-    const room = () => roomBeside(paneInView)
     // 20rem at the least: at a 1024 px window Hermes's sidebar (237 px), the chat (225 px) and its right column (160 px,
     // where Kumi's pane is) leave about 400 px, and a wider minimum squeezed the pane to nothing (H4).
     const openMap = () => {
@@ -220,9 +232,9 @@ const plugin: HermesPlugin = {
       if (!ids.length) return
       store.found(revision, ids, said)
       if (!ctx.storage.get(OPEN_MAP_ON_FIND, true)) return
-      // Beside the chat where there's room for it; narrower, Kumi's pane offers it at its top instead (P8).
-      if (room()) openMap()
-      else store.wait({ tab: 'map', count: ids.length })
+      // Held at the top of Kumi's pane while it shows in a window with no room beside it; anywhere else, opened (P8).
+      if (holdBack()) store.wait({ tab: 'map', count: ids.length })
+      else openMap()
     }
     ctx.onEvent(`plugin.${PLUGIN_ID}.sounds.found`, event => {
       const payload = payloadOf(event)
@@ -251,8 +263,8 @@ const plugin: HermesPlugin = {
           if (calls.has(id)) return
           calls.add(id)
           store.measure(id, result)
-          if (room()) openMeasurements()
-          else store.wait({ tab: 'measurements' })
+          if (holdBack()) store.wait({ tab: 'measurements' })
+          else openMeasurements()
         }, LISTEN_FALLBACK_MS)
       )
     })
@@ -301,6 +313,7 @@ const plugin: HermesPlugin = {
       if (stop) ctx.onDispose(stop)
     }
     ctx.onDispose(() => {
+      disposed = true
       for (const cancel of waiting.values()) cancel()
       closeMap?.()
       closeMeasurements?.()

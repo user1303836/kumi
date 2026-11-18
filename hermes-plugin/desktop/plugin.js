@@ -5424,13 +5424,12 @@ function visibleLine(line) {
   if (text || !parts.length) parts.push(text);
   return parts;
 }
-function CodeBlock({ code, label }) {
-  const t = useT();
+function CodeBlock({ code, label, caption }) {
   const lines = code.split(/\r?\n/);
   if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-  return (
-    // Focusable, so the keyboard can scroll it (and its hint shows on that focus too).
-    /* @__PURE__ */ jsx6(Tip2, { label: t("script.codeTitle"), children: /* @__PURE__ */ jsx6(
+  return /* @__PURE__ */ jsxs6("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
+    caption && /* @__PURE__ */ jsx6("span", { style: { ...TYPE.caption, color: T.faint }, children: caption }),
+    /* @__PURE__ */ jsx6(
       "div",
       {
         "aria-label": label,
@@ -5443,8 +5442,8 @@ function CodeBlock({ code, label }) {
           /* @__PURE__ */ jsx6("span", { style: { whiteSpace: "pre", paddingRight: 8 }, children: visibleLine(line) })
         ] }, index)) })
       }
-    ) })
-  );
+    )
+  ] });
 }
 
 // src/desktop/script.tsx
@@ -5512,9 +5511,9 @@ function PendingScriptView({ script, daw }) {
       return spec ? /* @__PURE__ */ jsxs7(Fragment2, { children: [
         spec.name && /* @__PURE__ */ jsx7("span", { style: { ...S.text, fontWeight: 600 }, children: clean(spec.name, 32) }),
         /* @__PURE__ */ jsx7(Controls, { spec }),
-        /* @__PURE__ */ jsx7(CodeBlock, { code: spec.code, label: t("script.deviceCode") })
+        /* @__PURE__ */ jsx7(CodeBlock, { caption: t("script.codeTitle"), code: spec.code, label: t("script.deviceCode") })
       ] }) : /* @__PURE__ */ jsx7("span", { style: S.muted, children: t("script.unreadable") });
-    })() : /* @__PURE__ */ jsx7(CodeBlock, { code: code.code, label: t("script.code") }) : code === false ? /* @__PURE__ */ jsx7("span", { style: S.muted, children: t("script.unreadable") }) : /* @__PURE__ */ jsx7("span", { style: S.faint, children: t("script.reading") })
+    })() : /* @__PURE__ */ jsx7(CodeBlock, { caption: t("script.codeTitle"), code: code.code, label: t("script.code") }) : code === false ? /* @__PURE__ */ jsx7("span", { style: S.muted, children: t("script.unreadable") }) : /* @__PURE__ */ jsx7("span", { style: S.faint, children: t("script.reading") })
   ] });
 }
 function SavedScript({ item, store }) {
@@ -5556,19 +5555,48 @@ function ownerSession(state) {
   return typeof session === "string" && session ? session : null;
 }
 var TONE3 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
+var LEAST_ON_SCREEN = 128;
+var STEPS = Array.from({ length: 101 }, (_, step2) => step2 / 100);
+var LOOK_AGAIN_MS = 1e3;
+var unhidden = (element) => typeof element.checkVisibility !== "function" || element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
 function KumiPane({ onShown, ...props }) {
   const root = useRef4(null);
+  const [cut, setCut] = useState5({ left: 0, right: 0 });
   useEffect4(() => {
     const element = root.current;
-    if (!element || !onShown) return;
-    const seen = new IntersectionObserver((entries) => onShown(entries.some((entry) => entry.isIntersecting)));
+    if (!element) return;
+    let intersecting = false;
+    let said = null;
+    const say = () => {
+      const shown = intersecting && unhidden(element);
+      if (shown === said) return;
+      said = shown;
+      onShown?.(shown);
+    };
+    const seen = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1];
+        if (!entry) return;
+        intersecting = entry.isIntersecting;
+        say();
+        const box = entry.boundingClientRect;
+        const shown = entry.intersectionRect;
+        const left = entry.isIntersecting ? Math.max(0, Math.round(shown.left - box.left)) : 0;
+        const right = entry.isIntersecting ? Math.max(0, Math.round(box.right - shown.right)) : 0;
+        const next = box.width - left - right < LEAST_ON_SCREEN ? { left: 0, right: 0 } : { left, right };
+        setCut((current) => current.left === next.left && current.right === next.right ? current : next);
+      },
+      { threshold: STEPS }
+    );
     seen.observe(element);
+    const timer = setInterval(say, LOOK_AGAIN_MS);
     return () => {
       seen.disconnect();
-      onShown(false);
+      clearInterval(timer);
+      onShown?.(false);
     };
   }, [onShown]);
-  return /* @__PURE__ */ jsx8("div", { ref: root, style: { height: "100%" }, children: /* @__PURE__ */ jsx8(PaneBody, { ...props }) });
+  return /* @__PURE__ */ jsx8("div", { ref: root, style: { height: "100%" }, children: /* @__PURE__ */ jsx8("div", { style: { height: "100%", marginLeft: cut.left, marginRight: cut.right }, children: /* @__PURE__ */ jsx8(PaneBody, { ...props }) }) });
 }
 function PaneBody({ ctx, store, onOpenMap, onOpenMeasurements }) {
   const t = useT();
@@ -12269,10 +12297,9 @@ var POLL_MS = 5e3;
 var IDLE_POLLS = 6;
 var JOB_POLL_MS = 2e3;
 var ROOM_BESIDE_LEAST = 237 + 320 + 320 + 320;
-var PANE_ROOM = 320;
-function roomBeside2(paneShown = true) {
+function roomBeside2() {
   const width = globalThis.innerWidth;
-  return typeof width !== "number" || width >= ROOM_BESIDE_LEAST - (paneShown ? 0 : PANE_ROOM);
+  return typeof width !== "number" || width >= ROOM_BESIDE_LEAST;
 }
 var usePluginWords = typeof sdk3.usePluginI18n === "function" ? sdk3.usePluginI18n : null;
 function WithT({ children }) {
@@ -12296,11 +12323,20 @@ var plugin = {
     let closeMeasurements = null;
     let measurementsPane = null;
     const mapView = () => /* @__PURE__ */ jsx32(WithT, { children: /* @__PURE__ */ jsx32(MapWorkspace, { audition, ctx, store }) });
-    let paneInView = true;
+    let paneInView = false;
+    let disposed = false;
+    const holdBack = () => paneInView && !roomBeside2();
     const notePane = (shown) => {
+      if (shown === paneInView) return;
       paneInView = shown;
+      if (shown) return;
+      ctx.setTimeout(() => {
+        if (paneInView || disposed) return;
+        const held = store.get().waiting;
+        if (held?.tab === "map") openMap();
+        else if (held?.tab === "measurements") openMeasurements();
+      }, 0);
     };
-    const room = () => roomBeside2(paneInView);
     const openMap = () => {
       if (store.get().waiting?.tab === "map") store.wait(null);
       if (typeof host6.openWorkspace === "function") {
@@ -12386,8 +12422,8 @@ var plugin = {
       if (!ids.length) return;
       store.found(revision, ids, said);
       if (!ctx.storage.get(OPEN_MAP_ON_FIND, true)) return;
-      if (room()) openMap();
-      else store.wait({ tab: "map", count: ids.length });
+      if (holdBack()) store.wait({ tab: "map", count: ids.length });
+      else openMap();
     };
     ctx.onEvent(`plugin.${PLUGIN_ID}.sounds.found`, (event) => {
       const payload = payloadOf(event);
@@ -12411,8 +12447,8 @@ var plugin = {
           if (calls.has(id)) return;
           calls.add(id);
           store.measure(id, result);
-          if (room()) openMeasurements();
-          else store.wait({ tab: "measurements" });
+          if (holdBack()) store.wait({ tab: "measurements" });
+          else openMeasurements();
         }, LISTEN_FALLBACK_MS)
       );
     });
@@ -12455,6 +12491,7 @@ var plugin = {
       if (stop) ctx.onDispose(stop);
     }
     ctx.onDispose(() => {
+      disposed = true;
       for (const cancel of waiting.values()) cancel();
       closeMap?.();
       closeMeasurements?.();
@@ -12567,7 +12604,6 @@ export {
   LISTEN_FALLBACK_MS,
   MAP_WORKSPACE,
   MEASUREMENTS_WORKSPACE,
-  PANE_ROOM,
   PLUGIN_ID,
   POLL_MS,
   ROOM_BESIDE_LEAST,

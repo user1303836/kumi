@@ -103,14 +103,14 @@ export function PendingScriptView({ script, daw }: { script: { pending: PendingS
               <>
                 {spec.name && <span style={{ ...S.text, fontWeight: 600 }}>{clean(spec.name, 32)}</span>}
                 <Controls spec={spec} />
-                <CodeBlock code={spec.code} label={t('script.deviceCode')} />
+                <CodeBlock caption={t('script.codeTitle')} code={spec.code} label={t('script.deviceCode')} />
               </>
             ) : (
               <span style={S.muted}>{t('script.unreadable')}</span>
             )
           })()
         ) : (
-          <CodeBlock code={code.code} label={t('script.code')} />
+          <CodeBlock caption={t('script.codeTitle')} code={code.code} label={t('script.code')} />
         )
       ) : code === false ? (
         <span style={S.muted}>{t('script.unreadable')}</span>
