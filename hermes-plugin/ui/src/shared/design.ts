@@ -4,6 +4,7 @@
 // option is optional: one left unset is drawn from the seed, so Reroll varies it. Plain data here, no DOM: tested in
 // ui/tests.
 import { artifactReference, plainId, quotable } from './format.ts'
+import type { PaletteItem } from './palette.ts'
 
 export type DesignOp = 'cross' | 'fuse' | 'grow' | 'stack'
 export type DesignMode = 'attack' | 'blend' | 'loop' | 'modulate' | 'resonate' | 'smear' | 'texture'
@@ -480,24 +481,45 @@ function cutAtWord(text: string, most: number): string {
   return `${(space > most / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
-/** A result's name, as the palette names it once kept (the backend's `_design_name`, the same rule): how it was made
- *  and from what, "Blend of Kick 02 + Tom 4", "Stack of Punch Kick 09 + 14 more"; a grown sound by its recipe's lead
- *  ("Grown 50% of the way from … toward …"). Never a seed or an id. At most `MADE_NAME_MOST` characters, the count of
- *  the rest always whole. */
-export function resultName(result: Pick<DesignResult, 'recipe' | 'mode' | 'op' | 'sources'>): string {
-  if (result.op === 'grow') return cutAtWord(quotable(result.recipe.split(/[:;]/, 1)[0] ?? '', 200), MADE_NAME_MOST) || 'Grown'
+/** A result's name within `most` characters: how it was made and from what, "Blend of Kick 02 + Tom 4", "Stack of
+ *  Punch Kick 09 + 14 more"; a grown sound by its recipe's lead ("Grown 50% of the way from … toward …"). The count of
+ *  the rest is always whole. */
+function nameWithin(result: Pick<DesignResult, 'recipe' | 'mode' | 'op' | 'sources'>, most: number): string {
+  if (result.op === 'grow') return cutAtWord(quotable(result.recipe.split(/[:;]/, 1)[0] ?? '', 200), most) || 'Grown'
   const { way, named } = madeOf(result)
   const total = result.sources.length
   if (named.length === 0) return total > 1 ? `${MADE_WAYS[way]} of ${total} sounds` : MADE_WAYS[way]
   const lead = `${MADE_WAYS[way]} of `
   const rest = (shown: number) => (total > shown ? ` + ${total - shown} more` : '')
-  const first = cutAtWord(named[0], MADE_NAME_MOST - lead.length - rest(named.length).length - (named.length > 1 ? named[1].length + 3 : 0))
+  const first = cutAtWord(named[0], most - lead.length - rest(named.length).length - (named.length > 1 ? named[1].length + 3 : 0))
   return `${lead}${first}${named.length > 1 ? ` + ${named[1]}` : ''}${rest(named.length)}`
 }
 
-/** A result as a source for another make: by its id, under the name the palette would give it. */
-export function sourceOfResult(result: Pick<DesignResult, 'artifact_id' | 'recipe' | 'mode' | 'op' | 'sources'>): DesignSource {
-  return { artifact_id: result.artifact_id, name: resultName(result) }
+/** A result's name, as the palette names it once kept (the backend's `_design_name`, the same rule): `nameWithin` in
+ *  `MADE_NAME_MOST` characters, never a seed or an id. The seed stays behind the result's Details, so two variations of
+ *  one recipe would read alike: a later one is numbered past the names `taken` has (" · 2", " · 3"), the number inside
+ *  the longest name. */
+export function resultName(result: Pick<DesignResult, 'recipe' | 'mode' | 'op' | 'sources'>, taken: readonly string[] = []): string {
+  const plain = nameWithin(result, MADE_NAME_MOST)
+  if (!taken.includes(plain)) return plain
+  for (let n = 2; ; n += 1) {
+    const mark = ` · ${n}`
+    const name = `${nameWithin(result, MADE_NAME_MOST - mark.length)}${mark}`
+    if (!taken.includes(name)) return name
+  }
+}
+
+/** The name a made sound goes by beside a palette's `items`: its own item's once kept there, else the one the palette
+ *  would give it now (`resultName` numbered past theirs, as the backend keeps it). */
+export function madeNameIn(items: readonly Pick<PaletteItem, 'artifact_id' | 'name'>[], result: Pick<DesignResult, 'artifact_id' | 'recipe' | 'mode' | 'op' | 'sources'>): string {
+  const own = items.find(item => item.artifact_id === result.artifact_id)
+  return own ? own.name : resultName(result, items.map(item => item.name))
+}
+
+/** A result as a source for another make: by its id, under the name the palette gives it (`madeNameIn`), else its
+ *  plain name. */
+export function sourceOfResult(result: Pick<DesignResult, 'artifact_id' | 'recipe' | 'mode' | 'op' | 'sources'>, name = resultName(result)): DesignSource {
+  return { artifact_id: result.artifact_id, name }
 }
 
 /** The stages a modulate result's recipe names ("ring by Kick 02 → low-pass filter follows Snare 4"), in order: one
@@ -511,11 +533,11 @@ export function stagesOf(recipe: string): string[] {
   return stages.length > 1 ? stages : []
 }
 
-/** What Use… puts in the input, unsent: the result's reference and nothing else (its name as the palette gives it, then
- *  its artifact id), so the producer says what to do with it; the model can hand `{artifact_id}` to a file step. Null
- *  for an id the runtime doesn't write. */
-export function useRequest(result: Pick<DesignResult, 'artifact_id' | 'recipe' | 'mode' | 'op' | 'sources'>): string | null {
-  return artifactReference(result.artifact_id, resultName(result))
+/** What Use… puts in the input, unsent: the result's reference and nothing else (its name as the palette gives it,
+ *  `madeNameIn`, then its artifact id), so the producer says what to do with it; the model can hand `{artifact_id}` to a
+ *  file step. Null for an id the runtime doesn't write. */
+export function useRequest(result: Pick<DesignResult, 'artifact_id' | 'recipe' | 'mode' | 'op' | 'sources'>, name = resultName(result)): string | null {
+  return artifactReference(result.artifact_id, name)
 }
 
 /** The sounds the panel makes from: picks in map order, or the palette's playable items, as the engine names them. */

@@ -94,3 +94,61 @@ test("on a short map what docks at the foot is never covered: the picks' actions
     assert.ok(y >= bar && y <= height - 220, `${id} framed above the foot at ${y}`)
   }
 })
+
+test("a near search's frame keeps every found sound in the room the map shows, at 466 × 750, and keeps them there as the map's top settles", () => {
+  // Hermes's default split at 1440 × 900: the map column 466 × 750, its top column (search, tools, a two-row legend) to
+  // 195 px, a find's list folded to its head under it (to 300 px), the corner folded at the foot (10 + 40 + 8 px).
+  let seed = 7
+  const next = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  const gauss = () => Math.sqrt(-2 * Math.log(next())) * Math.cos(2 * Math.PI * next())
+  const points = [
+    ...Array.from({ length: 540 }, (_, n) => [`k-${n}`, 0.18 + gauss() * 0.06, 0.72 + gauss() * 0.06, 0]),
+    ...Array.from({ length: 360 }, (_, n) => [`b-${n}`, 0.24 + gauss() * 0.05, 0.4 + gauss() * 0.05, 1])
+  ]
+  const model = map.buildModel({ revision: 'r1', points, groups: {}, sounds: {} })
+  const [width, height, top, corner, listBottom, foot] = [466, 750, 195, 76, 300, 58]
+  const inRoom = (view, side, ids) =>
+    model.points
+      .filter(point => ids.has(point.id))
+      .map(point => map.toScreen(view, side, point.x, point.y))
+      .every(([x, y]) => x >= 0 && x <= width && y >= listBottom && y <= height - foot)
+  // A tight near search (the 15 sounds nearest one kick, closeness 99 to 100) frames zoomed right in; a loose one
+  // (kicks all over) near the whole map.
+  const seedKick = model.points.find(point => point.id === 'k-0')
+  const nearest = [...model.points].sort((a, b) => Math.hypot(a.x - seedKick.x, a.y - seedKick.y) - Math.hypot(b.x - seedKick.x, b.y - seedKick.y)).slice(0, 15)
+  for (const ids of [new Set(nearest.map(point => point.id)), new Set(Array.from({ length: 15 }, (_, n) => `k-${n * 7}`))]) {
+    const side = map.mapSide(width, height, top, corner)
+    const framed = map.frame(model, ids, width, height, top, 0, 48, { top: listBottom, bottom: foot }, corner)
+    assert.ok(inRoom(framed, side, ids), JSON.stringify(framed))
+    // The legend then wraps to a third row: the map's side shrinks, and the framed sounds stay where they were.
+    const settled = map.mapSide(width, height, top + 30, corner)
+    assert.ok(inRoom(map.keepPlace(framed, side, settled), settled, ids))
+  }
+})
+
+test('mid-move, the pointer meets a sound where it is drawn, not where its new layout is taking it', () => {
+  const model = map.buildModel({ revision: 'r1', points: [['a', 0.2, 0.2, 0], ['b', 0.8, 0.8, 0]], groups: {}, sounds: {} })
+  const view = map.fitView(400, 400)
+  const side = map.mapSide(400, 400)
+  // Half-way through a move: `a` drawn at the middle on its way from (0.2, 0.2); `b` where it was.
+  const drawn = map.placedModel(model, Float32Array.from([0.5, 0.5, 0.8, 0.8]))
+  assert.equal(map.pick(drawn, view, side, ...map.toScreen(view, side, 0.5, 0.5)), 0)
+  assert.equal(map.pick(drawn, view, side, ...map.toScreen(view, side, 0.2, 0.2)), -1)
+  assert.deepEqual(map.pointsInBox(drawn, view, side, [...map.toScreen(view, side, 0.4, 0.4), ...map.toScreen(view, side, 0.6, 0.6)]), [0])
+})
+
+test('Fit shows the whole map in the free room: below the top column, above all that docks at the foot as measured, left of a side sheet; and zooms in smoothly from there', () => {
+  // 600 × 500, the legend to 80 px and the corner's fixed room (76 px) setting the map's side; a find's card to 230 px,
+  // the player, the corner and the picks' actions taking the foot's 180 px, a side sheet over the right 200 px.
+  const [width, height, top, corner, sheet, room] = [600, 500, 80, 76, 200, { top: 230, bottom: 180 }]
+  const side = map.mapSide(width, height, top, corner)
+  const fitted = map.fitView(width, height, top, sheet, corner, room)
+  const [[x0, y0], [x1, y1]] = [map.toScreen(fitted, side, 0, 0), map.toScreen(fitted, side, 1, 1)]
+  assert.ok(x0 >= 0 && x1 <= width - sheet && y0 >= room.top && y1 <= height - room.bottom, JSON.stringify(fitted))
+  assert.ok(fitted.scale < 1)
+  // With nothing more than the legend and the corner, the fit is the whole map at its own side, as ever.
+  assert.equal(map.fitView(width, height, top, 0, corner).scale, 1)
+  // From a fit below 1×, a zoom in goes on from there (no jump to 1×), and a zoom out stays put.
+  assert.ok(Math.abs(map.zoomAt(fitted, 1.1, 100, 300).scale - fitted.scale * 1.1) < 1e-9)
+  assert.equal(map.zoomAt(fitted, 0.5, 100, 300).scale, fitted.scale)
+})

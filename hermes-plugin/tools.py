@@ -1821,7 +1821,8 @@ def palette_edit(host: Host, state: Path, the_map: Any, action: Any, args: dict)
         if not sound_ids and not artifact_ids:
             raise palettes.Invalid("add takes sound_ids (from kumi_sounds or list) or artifact_ids (Kumi results).")
         folders = host.library_folders() if artifact_ids else []
-        artifacts = [(each, snapshots.palette_artifact(state, each, folders)) for each in artifact_ids]
+        taken = palettes.names(state) if artifact_ids else ()
+        artifacts = snapshots.palette_artifacts(state, artifact_ids, folders, taken)
         if any(name is None for _, name in artifacts):
             raise palettes.Invalid("Kumi can't play one of those results here, so it can't go in the palette: "
                                    "artifact_ids are Kumi results' artifact_id.")

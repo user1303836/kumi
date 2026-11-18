@@ -2,6 +2,8 @@
 // corners ticked like a viewfinder's, and, at the corner the pointer holds, how many sounds letting go would pick.
 import { T } from '@kumi/theme'
 
+import { TYPE } from '../ui.tsx'
+
 /** How long a corner's tick is, at most, and how far from the pointer's corner the count sits. */
 const TICK = 12
 const GAP = 10
@@ -56,10 +58,9 @@ export function PickBox({
           borderRadius: 999,
           background: `color-mix(in srgb, ${T.accent} 24%, ${T.raised})`,
           color: T.text,
-          fontSize: 11.5,
+          ...TYPE.small,
           fontWeight: 600,
           fontVariantNumeric: 'tabular-nums',
-          lineHeight: '16px',
           whiteSpace: 'nowrap',
           pointerEvents: 'none'
         }}

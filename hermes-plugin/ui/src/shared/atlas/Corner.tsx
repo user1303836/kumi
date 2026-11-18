@@ -1,21 +1,23 @@
 // The map's corner, bottom left: what the map is and what can be done on it now, in two lines of glass. Above, how many
-// sounds in how many families, the layout as a button anyone can find (it opens the layout menu), and the zoom. Below,
-// the hint line: the gestures that do something now, each a keycap and a word, written from the same table the map's
-// handlers read (`gestures.ts`); the count of the picks while there are some; Grow's prompt while it names its sounds.
-// On a host's first maps, the first-open steps stand over both (`FirstOpen.tsx`).
+// sounds in how many families (the map's one count: a search's "12 of 900 sounds" too), the layout as a button anyone
+// can find (the map's one layout menu), and the zoom. Below, the hint line: the gestures that do something now, each a
+// keycap and a word, written from the same table the map's handlers read (`gestures.ts`); Grow's prompt while it names
+// its sounds. The picks' count is the picks' card's, not the corner's. On a host's first maps, the first-open steps
+// stand over both (`FirstOpen.tsx`).
+import { Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { ReactNode, RefObject } from 'react'
 
 import { glass } from '../mapUi.tsx'
-import { S, useT } from '../ui.tsx'
+import { S, TYPE, useT } from '../ui.tsx'
 import type { Deed, Gesture } from './gestures.ts'
 
-const caps = { fontSize: 10.5, fontWeight: 600, letterSpacing: '0.14em', textTransform: 'uppercase', color: T.faint, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' } as const
+const caps = { ...TYPE.caption, fontWeight: 600, letterSpacing: '0.14em', textTransform: 'uppercase', color: T.faint, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' } as const
 
 /** The name of the tool in hand, beside its icon in the toolbar (the icon's button already says it to a screen reader). */
 export function ToolName({ children }: { children: ReactNode }) {
   return (
-    <span aria-hidden style={{ color: T.accent, fontSize: 11.5, fontWeight: 600, margin: '0 7px 0 1px', whiteSpace: 'nowrap' }}>
+    <span aria-hidden style={{ ...TYPE.small, color: T.accent, fontWeight: 600, margin: '0 7px 0 1px', whiteSpace: 'nowrap' }}>
       {children}
     </span>
   )
@@ -31,7 +33,7 @@ function Keycap({ children }: { children: ReactNode }) {
         border: `1px solid color-mix(in srgb, ${T.muted} 45%, transparent)`,
         borderBottomWidth: 2,
         borderRadius: 5,
-        font: '600 10.5px ui-monospace, SFMono-Regular, Menlo, monospace',
+        font: '600 11px ui-monospace, SFMono-Regular, Menlo, monospace',
         lineHeight: '15px',
         color: T.text,
         background: `color-mix(in srgb, ${T.text} 5%, transparent)`,
@@ -48,7 +50,6 @@ export function Corner({
   families,
   layout,
   zoom,
-  picked,
   hint,
   prompt,
   bottom,
@@ -65,8 +66,6 @@ export function Corner({
   layout?: ReactNode
   /** The view's scale: 1 is the whole map. Left out where the line has no room for it. */
   zoom?: number
-  /** The picks' count in words, while there are some: it leads the hint line. */
-  picked?: string
   /** The hint line's gestures, each with what it does (`hintOf`). */
   hint: readonly (readonly [Gesture, Deed])[]
   /** What stands on the hint line instead: Grow's prompt while it names its sounds. */
@@ -111,17 +110,16 @@ export function Corner({
         </span>
         {layout}
         {zoom !== undefined && (
-          <span style={caps} title={t('corner.zoom')}>
-            {Math.round(zoom * 100)}%
-          </span>
+          <Tip label={t('corner.zoom')}>
+            <span style={caps}>{Math.round(zoom * 100)}%</span>
+          </Tip>
         )}
       </div>
       {prompt ?? (compact ? null : (
-        <div style={{ ...S.row, gap: 6, flexWrap: 'wrap', fontSize: 11.5, color: T.muted }}>
-          {picked && <span style={{ color: T.text, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>{picked}</span>}
+        <div style={{ ...S.row, gap: 6, flexWrap: 'wrap', ...TYPE.small, color: T.muted }}>
           {hint.map(([gesture, deed], index) => (
             <span key={gesture} style={{ ...S.row, gap: 5, whiteSpace: 'nowrap' }}>
-              {(index > 0 || picked) && (
+              {index > 0 && (
                 <span aria-hidden style={{ opacity: 0.4 }}>
                   ·
                 </span>

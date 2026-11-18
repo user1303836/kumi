@@ -72,10 +72,11 @@ export function drawWords(context: Context, words: readonly Word[], alpha: numbe
 // A name's width in the names' font, kept: a few hundred sounds are measured on every frame of a pan.
 const widths = new Map<string, number>()
 
-/** Each sound's name beside it (`gap` pixels to its right), in its colour, offered in `rank` order: only a name with
+/** Each sound's name beside it (`gap` pixels to its right; to its left when the right would cross the map's right edge
+ *  `edge`, and not at all when neither side has the room), in its colour, offered in `rank` order: only a name with
  *  empty map to lie on, clear of the other names and of `taken`, is written; `NAMES_MOST` at most. The names written,
  *  each as its box and its place in `names`: a name is the sound's as much as its point is (a click on it reaches it). */
-export function drawNames(context: Context, names: readonly (Word & { rank: number })[], gap: number, look: Lettering, taken: readonly Box[]): { box: Box; at: number }[] {
+export function drawNames(context: Context, names: readonly (Word & { rank: number })[], gap: number, look: Lettering, taken: readonly Box[], edge = Infinity): { box: Box; at: number }[] {
   if (names.length === 0) return []
   context.save()
   const font = `500 10.5px ${look.family}`
@@ -94,13 +95,13 @@ export function drawNames(context: Context, names: readonly (Word & { rank: numb
       width = context.measureText(word.text).width
       widths.set(key, width)
     }
-    return [word.x + gap, word.y - 7, width, 14]
+    return [word.x + gap + width <= edge ? word.x + gap : word.x - gap - width, word.y - 7, width, 14]
   })
   const clear = clearOf(
     boxes,
     offered.map(word => [word.x, word.y])
   )
-  const open = boxes.flatMap((_, index) => (clear[index] ? [index] : []))
+  const open = boxes.flatMap((box, index) => (clear[index] && box[0] >= 0 && box[0] + box[2] <= edge ? [index] : []))
   const written: { box: Box; at: number }[] = []
   for (const pick of fitting(open.map(index => boxes[index]), NAMES_MOST, 16, 5, taken)) {
     const index = open[pick]

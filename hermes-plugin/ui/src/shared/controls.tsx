@@ -2,12 +2,13 @@
 // value or a `[low, high]` range; a bipolar one fills from its middle and names its ends), choice pills, toggle chips,
 // and a group that folds. A control left unset rests: an option is "Auto" (the seed draws it, so Reroll varies it), a
 // steer control is at its neutral (it changes nothing). A double click, Delete or Backspace puts a slider back to rest.
+import { Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useRef, useState } from 'react'
 
 import type { Span } from './design.ts'
-import { FOCUSABLE, radioKeys, S } from './ui.tsx'
+import { FOCUSABLE, radioKeys, S, TYPE } from './ui.tsx'
 
 export type SliderValue = number | [number, number]
 
@@ -101,8 +102,10 @@ export function Slider({
   const fillTo = range || span.neutral !== undefined ? b : fraction(span, values[0])
   const shown = set ? format(value) : rest
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }} title={title}>
-      <span style={{ ...S.row, gap: 6, fontSize: 11.5, color: set ? T.secondary : T.muted }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+      {/* Its hint in Hermes's Tip, on the label (hover) and on each thumb (the keyboard's focus), never a native title. */}
+      <Tip label={title}>
+      <span style={{ ...S.row, gap: 6, ...TYPE.small, color: set ? T.secondary : T.muted }}>
         <span style={{ ...S.ellipsis, flex: 1 }}>{label}</span>
         <button
           aria-label={set ? `${label}: ${shown}` : `${label}: ${rest || '—'}`}
@@ -112,7 +115,7 @@ export function Slider({
           type="button"
           style={{
             font: 'inherit',
-            fontSize: 10.5,
+            ...TYPE.caption,
             fontVariantNumeric: 'tabular-nums',
             padding: '0 6px',
             borderRadius: 8,
@@ -127,6 +130,7 @@ export function Slider({
           {shown || '·'}
         </button>
       </span>
+      </Tip>
       <div
         onDoubleClick={() => onChange(undefined)}
         onPointerCancel={() => setDragging(null)}
@@ -136,11 +140,11 @@ export function Slider({
         }}
         onPointerUp={() => setDragging(null)}
         ref={track}
-        style={{ position: 'relative', height: 16, cursor: 'pointer', touchAction: 'none' }}
+        style={{ position: 'relative', height: 24, cursor: 'pointer', touchAction: 'none' }}
       >
-        <span aria-hidden style={{ position: 'absolute', left: 0, right: 0, top: 6, height: 4, borderRadius: 2, background: T.border, opacity: set ? 0.9 : 0.55 }} />
+        <span aria-hidden style={{ position: 'absolute', left: 0, right: 0, top: 10, height: 4, borderRadius: 2, background: T.border, opacity: set ? 0.9 : 0.55 }} />
         {span.neutral !== undefined && span.neutral > span.min && (
-          <span aria-hidden style={{ position: 'absolute', left: `${fraction(span, span.neutral) * 100}%`, top: 3, width: 1, height: 10, background: T.faint, transform: 'translateX(-0.5px)' }} />
+          <span aria-hidden style={{ position: 'absolute', left: `${fraction(span, span.neutral) * 100}%`, top: 7, width: 1, height: 10, background: T.faint, transform: 'translateX(-0.5px)' }} />
         )}
         {set && (
           <span
@@ -149,7 +153,7 @@ export function Slider({
               position: 'absolute',
               left: `${fillFrom * 100}%`,
               width: `${Math.max(0, fillTo - fillFrom) * 100}%`,
-              top: 6,
+              top: 10,
               height: 4,
               borderRadius: 2,
               background: T.accent,
@@ -159,6 +163,7 @@ export function Slider({
           />
         )}
         {values.map((at, thumb) => (
+          <Tip key={thumb} label={title}>
           <div
             aria-label={range ? `${label} ${thumb === 0 ? '↓' : '↑'}` : label}
             aria-valuemax={span.max}
@@ -166,14 +171,13 @@ export function Slider({
             aria-valuenow={at}
             aria-valuetext={set ? shown : rest}
             className={FOCUSABLE}
-            key={thumb}
             onKeyDown={keys(thumb)}
             role="slider"
             tabIndex={0}
             style={{
               position: 'absolute',
               left: `${fraction(span, at) * 100}%`,
-              top: 2,
+              top: 6,
               width: 12,
               height: 12,
               borderRadius: '50%',
@@ -185,10 +189,11 @@ export function Slider({
               transition: dragging === null ? 'left 120ms, transform 120ms, border-color 140ms' : 'transform 120ms'
             }}
           />
+          </Tip>
         ))}
       </div>
       {ends && (
-        <span aria-hidden style={{ ...S.row, justifyContent: 'space-between', fontSize: 10, color: T.faint, marginTop: -2 }}>
+        <span aria-hidden style={{ ...S.row, justifyContent: 'space-between', ...TYPE.caption, color: T.faint, marginTop: -2 }}>
           <span>{ends[0]}</span>
           <span>{ends[1]}</span>
         </span>

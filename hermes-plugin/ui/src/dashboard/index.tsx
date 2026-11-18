@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { addFolderRequest, beatSeconds, canUndoChange, chipWords, clean, cleanupWords, folderExample, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, statusNamesProject, undoRequest } from '../shared/format.ts'
 import { useFirstOpen } from '../shared/atlas/first.ts'
-import { sourceOfResult, useRequest } from '../shared/design.ts'
+import { type DesignResult, madeNameIn, sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
@@ -23,7 +23,7 @@ import { SampleFolders, useSampleFolders } from '../shared/SampleFolders.tsx'
 import { KumiStore } from '../shared/store.ts'
 import { nextSteps, setupWords } from '../shared/steps.ts'
 import type { AudioReply } from '../shared/types.ts'
-import { Dot, FocusStyle, I18n, S, Section, useT } from '../shared/ui.tsx'
+import { Dot, FocusStyle, I18n, S, Section, TYPE, useT } from '../shared/ui.tsx'
 import { SDK } from './react.ts'
 
 const BASE = '/api/plugins/kumi'
@@ -93,6 +93,8 @@ function Dashboard() {
   useWant(store, 'map')
   useWant(store, 'palette')
   const state = useKumi(store)
+  // A made sound by the name its palette gives it (a later variation of one recipe numbered), for Use and as a source.
+  const madeName = (result: DesignResult) => madeNameIn(state.palette?.current?.items ?? [], result)
   const playing = usePlaying(audition)
   const now = useNow()
   const [selected, setSelected] = useState<null | string>(null)
@@ -167,7 +169,7 @@ function Dashboard() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, color: T.text, minHeight: 'calc(100vh - 160px)' }}>
       <div style={{ ...S.row, gap: 10, padding: '4px 2px' }}>
         <Dot beat={connected ? beatSeconds(state.focus?.transport) : null} color={tone} size={9} />
-        <span style={{ fontSize: 15, fontWeight: 600 }}>{words.text}</span>
+        <span style={{ ...TYPE.body, fontWeight: 600 }}>{words.text}</span>
         {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
         {setupMessage && <span style={S.muted}>{setupMessage}</span>}
         {/* Setup's next step, to paste into a chat: the dashboard can't send one itself. */}
@@ -288,12 +290,12 @@ function Dashboard() {
             grow={grow}
             onPlayMade={result => void audition.play(result.artifact_id).catch(() => {})}
             growActions={result => {
-              const request = useRequest(result)
+              const request = useRequest(result, madeName(result))
               const kept = palette.kept.has(result.artifact_id)
               return (
                 <>
                   {/* From the grown point and the vine's far end: two sounds, so every way of making one is open. */}
-                  <Button kind="quiet" onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} tip={t('make.openTitle')}>
+                  <Button kind="quiet" onClick={() => palette.makeFrom([sourceOfResult(result, madeName(result)), ...(grow.to ? [grow.to.source] : [])])} tip={t('make.openTitle')}>
                     {t('make.open')}
                   </Button>
                   <span style={{ flex: 1 }} />
@@ -416,7 +418,7 @@ function Dashboard() {
               sources={palette.making}
               tempo={state.focus?.transport?.tempo}
               use={result => {
-                const request = useRequest(result)
+                const request = useRequest(result, madeName(result))
                 return request ? <CopyButton label={t('dashboard.copyUse')} text={request} /> : null
               }}
             />

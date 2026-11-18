@@ -120,6 +120,17 @@ test("a name the map writes is its sound's: each one written comes back with its
   assert.deepEqual(labels.drawNames(context, offered, 6, look, [[0, 0, 400, 100]]), [])
 })
 
+test("a sound's name near the map's right edge sits left of its sound, and one with room on neither side isn't written", () => {
+  const context = new Proxy({ measureText: () => ({ width: 50 }) }, { get: (target, key) => (key in target ? target[key] : () => {}), set: () => true })
+  const look = { family: 'sans-serif', ground: '#fff', muted: '#888' }
+  const [edge, gap] = [300, 6]
+  const written = labels.drawNames(context, [{ text: 'Edge Hat', color: '#f00', x: 280, y: 40, rank: 0 }], gap, look, [], edge)
+  assert.deepEqual(written[0].box, [280 - gap - 50, 33, 50, 14])
+  assert.ok(written.every(({ box }) => box[0] + box[2] <= edge))
+  // On a map 60 px wide, a 50 px name fits on neither side of a sound in its middle.
+  assert.deepEqual(labels.drawNames(context, [{ text: 'Edge Hat', color: '#f00', x: 30, y: 40, rank: 0 }], gap, look, [], 60), [])
+})
+
 test("the pulse follows the playing sound's level: up at once with a hit, settling after it, and plain before the waveform arrives", () => {
   // A hit, then a tail: loud at the start, quiet by the middle, silent at the end.
   const levels = [1, 0.6, 0.3, 0.1, 0.05, 0, 0, 0]

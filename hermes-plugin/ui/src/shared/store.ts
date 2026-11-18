@@ -23,6 +23,12 @@ export interface FolderCheck {
   error?: string
 }
 
+/** A sample folder Kumi may read (`GET /library/folders`), and whether it's gone from the disk since it was added. */
+export interface SampleFolder {
+  path: string
+  missing: boolean
+}
+
 export interface KumiState {
   /** null until the first answer; false when the backend half isn't mounted (the agent plugin is off). */
   available: boolean | null
@@ -245,6 +251,11 @@ export class KumiStore {
     return () => this.wanted.set(part, Math.max(0, (this.wanted.get(part) ?? 1) - 1))
   }
 
+  /** Whether a mounted view shows `part` now. */
+  wants(part: Part): boolean {
+    return (this.wanted.get(part) ?? 0) > 0
+  }
+
   /** Forget everything (another profile or connection): what's shown must be that profile's. */
   reset(): void {
     this.generation += 1
@@ -402,12 +413,15 @@ export class KumiStore {
     await this.refresh('map')
   }
 
-  /** The sample folders Kumi may read (`GET /library/folders`), for the Sample folders control; null when the read
-   *  fails (an older backend half, or the agent plugin off). */
-  async libraryFolders(): Promise<null | string[]> {
+  /** The sample folders Kumi may read (`GET /library/folders`), for the Sample folders control, each with whether it's
+   *  a folder on disk now (`missing`: the answer's subset of `folders` that isn't; none from an older backend); null
+   *  when the read fails (an older backend half, or the agent plugin off). */
+  async libraryFolders(): Promise<null | SampleFolder[]> {
     try {
-      const answer = await this.fetch<{ folders?: unknown }>('/library/folders')
-      return Array.isArray(answer?.folders) ? answer.folders.filter((folder): folder is string => typeof folder === 'string') : null
+      const answer = await this.fetch<{ folders?: unknown; missing?: unknown }>('/library/folders')
+      if (!Array.isArray(answer?.folders)) return null
+      const missing = new Set(Array.isArray(answer.missing) ? answer.missing.filter((folder): folder is string => typeof folder === 'string') : [])
+      return answer.folders.filter((folder): folder is string => typeof folder === 'string').map(path => ({ path, missing: missing.has(path) }))
     } catch {
       return null
     }

@@ -2,6 +2,7 @@
 // decoded from its own audio, in its group's colour, with a line running across while it plays (a click on the
 // waveform plays it too); and what can be done with it (the parent's actions: Add to palette, More like this, Use on
 // pad…, Use…). It slides up when a sound is picked, and × lets it go.
+import { Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
@@ -10,7 +11,7 @@ import { clean, seconds } from './format.ts'
 import { glass, Icon } from './mapUi.tsx'
 import { peaksFor, peaksKept } from './peaks.ts'
 import type { MapSound } from './types.ts'
-import { Chip, FOCUSABLE, S, useT } from './ui.tsx'
+import { Chip, FOCUSABLE, S, TYPE, useT } from './ui.tsx'
 
 const BARS = 160
 
@@ -124,33 +125,34 @@ export function Player({
       }}
     >
       <div style={{ ...S.row, gap: 10, flexWrap: 'wrap' }}>
-        <button
-          aria-label={playing ? t('map.stop') : t('map.play')}
-          className={FOCUSABLE}
-          onClick={playing ? onStop : onPlay}
-          title={t('map.playTitle')}
-          type="button"
-          style={{
-            flex: 'none',
-            width: 34,
-            height: 34,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 0,
-            borderRadius: '50%',
-            border: `1px solid ${color}`,
-            background: playing ? `color-mix(in srgb, ${color} 34%, transparent)` : `color-mix(in srgb, ${color} 14%, transparent)`,
-            color,
-            cursor: 'pointer',
-            boxShadow: playing ? `0 0 14px -2px ${color}` : 'none',
-            transition: 'background-color 140ms, box-shadow 200ms'
-          }}
-        >
-          <Icon name={playing ? 'stop' : 'play'} size={13} />
-        </button>
+        <Tip label={t('map.playTitle')}>
+          <button
+            aria-label={playing ? t('map.stop') : t('map.play')}
+            className={FOCUSABLE}
+            onClick={playing ? onStop : onPlay}
+            type="button"
+            style={{
+              flex: 'none',
+              width: 34,
+              height: 34,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              borderRadius: '50%',
+              border: `1px solid ${color}`,
+              background: playing ? `color-mix(in srgb, ${color} 34%, transparent)` : `color-mix(in srgb, ${color} 14%, transparent)`,
+              color,
+              cursor: 'pointer',
+              boxShadow: playing ? `0 0 14px -2px ${color}` : 'none',
+              transition: 'background-color 140ms, box-shadow 200ms'
+            }}
+          >
+            <Icon name={playing ? 'stop' : 'play'} size={13} />
+          </button>
+        </Tip>
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '0 1 220px' }}>
-          <span style={{ ...S.text, ...S.ellipsis, fontWeight: 650 }}>{name}</span>
+          <span style={{ ...S.text, ...S.ellipsis, fontWeight: 600 }}>{name}</span>
           <span style={{ ...S.row, gap: 4, marginTop: 2 }}>
             {sound.class && <Chip>{clean(sound.class, 16)}</Chip>}
             {sound.kind && <Chip>{clean(sound.kind, 16)}</Chip>}
@@ -159,18 +161,18 @@ export function Player({
         </div>
         <Waveform audio={audio} color={color} duration={typeof sound.duration === 'number' ? sound.duration : 2} id={id} onClick={playing ? onStop : onPlay} playing={playing} />
       </div>
+      {/* The × says what it does: no tip. */}
       <button
         aria-label={t('map.letGo')}
         className={FOCUSABLE}
         onClick={onClose}
-        title={t('map.letGo')}
         type="button"
         style={{ position: 'absolute', top: 6, right: 6, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, borderRadius: 12, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer' }}
       >
         <Icon name="close" size={12} />
       </button>
       <div style={{ ...S.row, gap: 6, flexWrap: 'wrap', marginRight: -26 }}>
-        {sound.folder && <span style={{ ...S.faint, ...S.ellipsis, flex: '1 1 8rem', fontSize: 11 }}>{clean(sound.folder, 80)}</span>}
+        {sound.folder && <span style={{ ...S.faint, ...S.ellipsis, flex: '1 1 8rem', ...TYPE.caption }}>{clean(sound.folder, 80)}</span>}
         <span style={{ ...S.row, gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', marginLeft: 'auto' }}>{actions}</span>
       </div>
     </section>

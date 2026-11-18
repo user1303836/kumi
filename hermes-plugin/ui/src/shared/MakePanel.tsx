@@ -18,7 +18,7 @@ import { CARDS, cardNote, DEFAULT_BPM, type DesignOptions, type DesignRequest, t
 import { clean, seconds } from './format.ts'
 import { CardOptions, LoopSection, SteerSection } from './MakeOptions.tsx'
 import type { Designed } from './store.ts'
-import { FOCUSABLE, radioKeys, S, SEGMENT_TRACK, segmentStyle, TYPE, useT } from './ui.tsx'
+import { FOCUSABLE, radioKeys, S, SEGMENT_TRACK, segmentStyle, TYPE, useEdgeFade, useT } from './ui.tsx'
 
 export interface MakePanelProps {
   /** The sounds to make from, in order (the picks, or the palette's), with their names. */
@@ -258,11 +258,11 @@ function Stages({ stages }: { stages: string[] }) {
       {stages.map((stage, index) => (
         <span key={index} role="listitem" style={{ ...S.row, gap: 4 }}>
           {index > 0 && (
-            <span aria-hidden style={{ color: T.faint, fontSize: 11 }}>
+            <span aria-hidden style={{ ...TYPE.caption, color: T.faint }}>
               →
             </span>
           )}
-          <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${T.accent} 30%, transparent)`, color: T.secondary }}>
+          <span style={{ ...TYPE.caption, padding: '1px 7px', borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${T.accent} 30%, transparent)`, color: T.secondary }}>
             {clean(stage, 80)}
           </span>
         </span>
@@ -321,6 +321,8 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   const requests = useRef(new Map<string, DesignRequest>())
   // Which variation of each take shows (its index), and which results arrived while the panel was open.
   const [shown, setShown] = useState<Record<string, number>>({})
+  // The results whose names read in full: a click or Enter on a name opens it in place (two lines otherwise), and folds it again.
+  const [openNames, setOpenNames] = useState<ReadonlySet<string>>(() => new Set())
   const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set())
   // The sound just made, brought into view once it's drawn (the cards above it can fill a narrow pane).
   const [arrived, setArrived] = useState<string | null>(null)
@@ -333,6 +335,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   // The panel's own scrolling list. A card comes into view by scrolling it alone: `scrollIntoView` would scroll every
   // ancestor too, the pane the map sits in among them.
   const list = useRef<HTMLDivElement | null>(null)
+  useEdgeFade(list)
   const reveal = (element: HTMLElement | null | undefined, where: 'nearest' | 'start') => {
     const box = list.current
     if (!box || !element) return
@@ -502,21 +505,21 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
         {TABS.map((tab, index) => {
           const picked = card.tab === tab
           return (
-            <button
-              aria-checked={picked}
-              className={FOCUSABLE}
-              disabled={refused}
-              key={tab}
-              onClick={() => setCardKey(lastMode[tab])}
-              {...radioKeys(index, TABS.length, TABS.indexOf(card.tab), next => setCardKey(lastMode[TABS[next]]))}
-              role="radio"
-              title={t(`make.opHints.${tab}`)}
-              type="button"
-              style={segment(picked)}
-            >
-              <Glyph card={TAB_GLYPH[tab]} size={14} />
-              <span style={S.ellipsis}>{t(`make.ops.${tab}`)}</span>
-            </button>
+            <Tip key={tab} label={t(`make.opHints.${tab}`)}>
+              <button
+                aria-checked={picked}
+                className={FOCUSABLE}
+                disabled={refused}
+                onClick={() => setCardKey(lastMode[tab])}
+                {...radioKeys(index, TABS.length, TABS.indexOf(card.tab), next => setCardKey(lastMode[TABS[next]]))}
+                role="radio"
+                type="button"
+                style={segment(picked)}
+              >
+                <Glyph card={TAB_GLYPH[tab]} size={14} />
+                <span style={S.ellipsis}>{t(`make.ops.${tab}`)}</span>
+              </button>
+            </Tip>
           )
         })}
       </div>
@@ -529,21 +532,21 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               setLastMode(current => ({ ...current, [chosen.tab]: chosen.key }))
             }
             return (
-              <button
-                aria-checked={picked}
-                className={FOCUSABLE}
-                disabled={refused}
-                key={entry.key}
-                onClick={() => choose(entry)}
-                {...radioKeys(index, modes.length, modes.findIndex(each => each.key === card.key), next => choose(modes[next]))}
-                role="radio"
-                title={t(`make.cards.${entry.key}.hint`)}
-                type="button"
-                style={segment(picked)}
-              >
-                <Glyph card={entry.key} size={13} />
-                {t(`make.cards.${entry.key}.title`)}
-              </button>
+              <Tip key={entry.key} label={t(`make.cards.${entry.key}.hint`)}>
+                <button
+                  aria-checked={picked}
+                  className={FOCUSABLE}
+                  disabled={refused}
+                  onClick={() => choose(entry)}
+                  {...radioKeys(index, modes.length, modes.findIndex(each => each.key === card.key), next => choose(modes[next]))}
+                  role="radio"
+                  type="button"
+                  style={segment(picked)}
+                >
+                  <Glyph card={entry.key} size={13} />
+                  {t(`make.cards.${entry.key}.title`)}
+                </button>
+              </Tip>
             )
           })}
         </div>
@@ -632,7 +635,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               tabIndex={index === SOURCES_FOLDED ? -1 : undefined}
             >
               {source.artifact_id ? (
-                <span aria-label={t('make.made')} role="img" style={{ color: T.accent, fontSize: 10, flex: 'none' }}>
+                <span aria-label={t('make.made')} role="img" style={{ ...TYPE.caption, color: T.accent, flex: 'none' }}>
                   ✦
                 </span>
               ) : (
@@ -700,44 +703,78 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                   {/* Its lineage along its top edge: the families it came from, each as wide as its share. */}
                   {lineage && <LineageBar shares={lineage(result)} />}
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                    {/* What it is, in a producer's words; how the engine made it (its recipe) in the tip. A modulate result
-                        names its stages below. */}
+                    {/* What it is, in a producer's words, two lines at most until a click or Enter opens it whole (and
+                        folds it again); how the engine made it (its recipe) in the tip, which the keyboard reaches too. A
+                        modulate result names its stages below. */}
                     <Tip label={clean(result.recipe, 400)}>
-                      <span style={{ ...TYPE.body, flex: 1, minWidth: 0, color: T.text, overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{name}</span>
-                    </Tip>
-                    {onSources && (
                       <button
-                        aria-label={t('make.choose', name)}
-                        aria-pressed={isChosen}
+                        aria-expanded={openNames.has(result.artifact_id)}
                         className={FOCUSABLE}
-                        onClick={() => setChosen(current => (current.includes(result.artifact_id) ? current.filter(id => id !== result.artifact_id) : [...current, result.artifact_id]))}
-                        ref={element => {
-                          if (element) chooses.current.set(result.artifact_id, element)
-                          else chooses.current.delete(result.artifact_id)
-                        }}
-                        title={t('make.chooseTitle')}
+                        onClick={() =>
+                          setOpenNames(current => {
+                            const next = new Set(current)
+                            if (!next.delete(result.artifact_id)) next.add(result.artifact_id)
+                            return next
+                          })
+                        }
                         type="button"
                         style={{
-                          flex: 'none',
-                          width: 20,
-                          height: 20,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          font: 'inherit',
+                          ...TYPE.body,
+                          flex: 1,
+                          minWidth: 0,
+                          minHeight: 24,
                           padding: 0,
-                          borderRadius: '50%',
-                          border: `1.5px solid ${isChosen ? T.accent : T.faint}`,
-                          background: isChosen ? T.accent : 'transparent',
-                          color: isChosen ? T.raised : 'transparent',
-                          fontSize: 11,
-                          fontWeight: 700,
+                          border: 'none',
+                          background: 'transparent',
+                          color: T.text,
+                          textAlign: 'left',
                           cursor: 'pointer',
-                          transform: isChosen ? 'scale(1.08)' : 'none',
-                          transition: 'background-color 140ms, border-color 140ms, transform 160ms'
+                          overflowWrap: 'anywhere',
+                          ...(openNames.has(result.artifact_id) ? {} : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' })
                         }}
                       >
-                        ✓
+                        {name}
                       </button>
+                    </Tip>
+                    {/* Choose: a 24 px target round a 20 px circle. */}
+                    {onSources && (
+                      <Tip label={t('make.chooseTitle')}>
+                        <button
+                          aria-label={t('make.choose', name)}
+                          aria-pressed={isChosen}
+                          className={FOCUSABLE}
+                          onClick={() => setChosen(current => (current.includes(result.artifact_id) ? current.filter(id => id !== result.artifact_id) : [...current, result.artifact_id]))}
+                          ref={element => {
+                            if (element) chooses.current.set(result.artifact_id, element)
+                            else chooses.current.delete(result.artifact_id)
+                          }}
+                          type="button"
+                          style={{ flex: 'none', width: 24, height: 24, margin: -2, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, border: 'none', borderRadius: '50%', background: 'transparent', cursor: 'pointer' }}
+                        >
+                          <span
+                            aria-hidden
+                            style={{
+                              width: 20,
+                              height: 20,
+                              boxSizing: 'border-box',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              borderRadius: '50%',
+                              border: `1.5px solid ${isChosen ? T.accent : T.faint}`,
+                              background: isChosen ? T.accent : 'transparent',
+                              color: isChosen ? T.raised : 'transparent',
+                              ...TYPE.caption,
+                              fontWeight: 600,
+                              transform: isChosen ? 'scale(1.08)' : 'none',
+                              transition: 'background-color 140ms, border-color 140ms, transform 160ms'
+                            }}
+                          >
+                            ✓
+                          </span>
+                        </button>
+                      </Tip>
                     )}
                   </div>
                   {stages.length > 0 && <Stages stages={stages} />}
@@ -760,7 +797,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                         border: `1px solid ${T.accent}`,
                         background: isPlaying ? `color-mix(in srgb, ${T.accent} 30%, transparent)` : `color-mix(in srgb, ${T.accent} 12%, transparent)`,
                         color: T.accent,
-                        fontSize: 11,
+                        ...TYPE.caption,
                         cursor: 'pointer',
                         transition: 'background-color 140ms'
                       }}
@@ -865,12 +902,12 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               {t('make.clearChosen')}
             </Button>
             {chosenJoin && (
-              <Button kind={chosenAlone ? 'secondary' : 'primary'} onClick={() => makeFrom([...sources, ...chosenNew.map(sourceOfResult)])} tip={t('make.addToSoundsTitle')}>
+              <Button kind={chosenAlone ? 'secondary' : 'primary'} onClick={() => makeFrom([...sources, ...chosenNew.map(result => sourceOfResult(result))])} tip={t('make.addToSoundsTitle')}>
                 {t('make.addToSounds')}
               </Button>
             )}
             {chosenAlone && (
-              <Button kind="primary" onClick={() => makeFrom(chosenResults.map(sourceOfResult))} tip={t('make.fromTheseTitle')}>
+              <Button kind="primary" onClick={() => makeFrom(chosenResults.map(result => sourceOfResult(result)))} tip={t('make.fromTheseTitle')}>
                 {t('make.fromThese')}
               </Button>
             )}

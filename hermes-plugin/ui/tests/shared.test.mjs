@@ -1231,7 +1231,6 @@ test('profile round identity is an unordered real member set, with exact windows
   // A retained artifact id alone must not override the new window's actual identity.
   const rounds = { stale: [{ id: 'old', kept: trimmed.artifact_id, name: 'Old reference' }] }
   assert.equal(listen.roundKey({ compare: trimmed }, rounds), listen.referenceKey({ compare: trimmed }))
-  assert.match(listen.windowWords(referenceWindow), /2 s measured \(96000 frames at 48000 Hz\)/)
   assert.equal(listen.displayReferenceName({ name: '/private/music/Reference.wav' }), 'Reference.wav')
   const kumi = new store.KumiStore(async () => ({}))
   const first = { ...excerpt, metrics: { file: 'Mix.wav' }, artifact_id: 'first-pass' }

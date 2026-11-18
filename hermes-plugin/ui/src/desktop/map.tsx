@@ -7,13 +7,13 @@
 // play here leaves the map quietly (never a notice per sound), and one line under the map counts them.
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
-import { Button } from '@kumi/controls'
+import { Button, Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
 import { addFolderRequest, clean, folderExample, jobWords, liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
 import { useFirstOpen } from '../shared/atlas/first.ts'
-import { sourceOfResult, useRequest } from '../shared/design.ts'
+import { type DesignResult, madeNameIn, sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MakePanel, sideSheetWidth } from '../shared/MakePanel.tsx'
@@ -25,7 +25,7 @@ import { usePaletteMap } from '../shared/paletteMap.ts'
 import { SampleFolders, useSampleFolders } from '../shared/SampleFolders.tsx'
 import { errorText, type KumiStore } from '../shared/store.ts'
 import { nextSteps } from '../shared/steps.ts'
-import { FOCUSABLE, useT } from '../shared/ui.tsx'
+import { FOCUSABLE, TYPE, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { ownerSession } from './pane.tsx'
 
@@ -68,18 +68,18 @@ export function PadPicker({ daw, onPick, onClose }: { daw: unknown; onPick: (not
       {PAD_ROWS.flat().map(note => {
         const name = daw === 'ableton' ? liveNote(note) : String(note)
         return (
-          <button
-            aria-label={t('map.pad', name, note)}
-            className={FOCUSABLE}
-            key={note}
-            onClick={() => onPick(note)}
-            ref={note === 36 ? first : undefined}
-            style={{ font: 'inherit', fontSize: 11, height: 28, borderRadius: 4, border: `1px solid ${T.border}`, background: 'transparent', color: T.text, cursor: 'pointer' }}
-            title={t('map.pad', name, note)}
-            type="button"
-          >
-            {name}
-          </button>
+          <Tip key={note} label={t('map.pad', name, note)}>
+            <button
+              aria-label={t('map.pad', name, note)}
+              className={FOCUSABLE}
+              onClick={() => onPick(note)}
+              ref={note === 36 ? first : undefined}
+              style={{ font: 'inherit', ...TYPE.caption, height: 28, borderRadius: 4, border: `1px solid ${T.hairline}`, background: 'transparent', color: T.text, cursor: 'pointer' }}
+              type="button"
+            >
+              {name}
+            </button>
+          </Tip>
         )
       })}
     </div>
@@ -91,6 +91,8 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   useWant(store, 'map')
   useWant(store, 'palette')
   const state = useKumi(store)
+  // A made sound by the name its palette gives it (a later variation of one recipe numbered), for Use and as a source.
+  const madeName = (result: DesignResult) => madeNameIn(state.palette?.current?.items ?? [], result)
   const playing = usePlaying(audition)
   const [selected, setSelected] = useState<null | string>(null)
   // The sound whose pad picker is open: one at a time, and it closes when another sound is picked.
@@ -133,7 +135,8 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   const map = state.map
   // Sample folders: the folders now, and adding one by its path. The request goes to Kumi's chat, whose approval names
   // the folder. Desktop's folder dialog also grants the plugin's Desktop half file access there, which Kumi never
-  // uses, so the grant is given straight back: only the path is kept.
+  // uses, so the grant is given straight back: only the path is kept. Hermes in a browser has no dialog: its file door
+  // answers `unavailable`, asked by listing the plugin's own data folder (nothing opens), so Choose… never shows there.
   const folders = useSampleFolders(store, map?.revision)
   const [foldersOpen, setFoldersOpen] = useState(false)
   const files = ctx.files
@@ -141,21 +144,28 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
     <SampleFolders
       ask={async (folder, known) => (await ask(ctx, known ? RESCAN_REQUEST : addFolderRequest(folder), { send: true, session })).outcome}
       check={typed => store.checkFolder(typed)}
-      example={folderExample(state.setup?.target)}
-      folders={folders}
-      onClose={onClose}
-      pick={
+      dialog={
         typeof files?.requestFolder === 'function'
-          ? async () => {
-              const answer = await files.requestFolder()
-              // Hermes in a browser has no folder dialog (Desktop says why itself when it refuses a folder of its own).
-              if (!answer.ok && answer.error === 'unavailable') host.notify({ kind: 'info', message: t('folders.noDialog') })
-              if (!answer.ok || !answer.folder) return null
-              void files.release?.(answer.folder.id)
-              return answer.folder.path
+          ? {
+              present: async () => {
+                if (typeof files.list !== 'function') return true
+                const answer = await files.list('data')
+                return answer.ok || answer.error !== 'unavailable'
+              },
+              pick: async () => {
+                const answer = await files.requestFolder()
+                // Desktop says why itself when it refuses a folder of its own.
+                if (!answer.ok) return answer.error === 'unavailable' ? false : null
+                if (!answer.folder) return null
+                void files.release?.(answer.folder.id)
+                return answer.folder.path
+              }
             }
           : undefined
       }
+      example={folderExample(state.setup?.target)}
+      folders={folders}
+      onClose={onClose}
     />
   )
   // An empty map says what builds it and offers that step: setup when Kumi's runtime is missing (the pane's own steps,
@@ -208,6 +218,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         <MapCanvas
           audio={id => audition.url(id)}
           coverRight={palette.making && beside ? sideSheetWidth(areaWidth) + 16 : 0}
+          veiled={Boolean(palette.making) && !beside}
           onStop={() => audition.stop()}
           actions={(id, sound) => {
             const request = soundRequest(id, sound.name, map?.revision)
@@ -270,11 +281,11 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           grow={grow}
           onPlayMade={result => playMade(result.artifact_id)}
           growActions={result => {
-            const request = useRequest(result)
+            const request = useRequest(result, madeName(result))
             const kept = palette.kept.has(result.artifact_id)
             return (
               <>
-                <Button kind="quiet" onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} tip={t('make.openTitle')}>
+                <Button kind="quiet" onClick={() => palette.makeFrom([sourceOfResult(result, madeName(result)), ...(grow.to ? [grow.to.source] : [])])} tip={t('make.openTitle')}>
                   {t('make.open')}
                 </Button>
                 <span style={{ flex: 1 }} />
@@ -323,8 +334,9 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
                     ) : null
                   })()}
                 {near && (
+                  // The request takes the first MOST_NEAR picks: past that, the button says so beside the picks' count.
                   <Button kind="quiet" onClick={() => ask(ctx, near, { send: false, session })} tip={ids.length > MOST_NEAR ? t('map.moreLikeTheseFirst', MOST_NEAR, ids.length) : t('map.moreLikeTheseTitle')}>
-                    {t('map.moreLikeThese', Math.min(ids.length, MOST_NEAR))}
+                    {ids.length > MOST_NEAR ? t('map.moreLikeFirst', MOST_NEAR) : t('map.moreLikeThese')}
                   </Button>
                 )}
                 <Button kind="quiet" onClick={palette.clearPicks} tip={t('dock.clearPicksTitle')}>
@@ -397,7 +409,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             sources={palette.making}
             tempo={state.focus?.transport?.tempo}
             use={result => {
-              const request = useRequest(result)
+              const request = useRequest(result, madeName(result))
               return request ? (
                 <Button onClick={() => ask(ctx, request, { send: false, session })} tip={t('make.useTitle')}>
                   {t('make.use')}

@@ -248,8 +248,10 @@ def designs_made() -> dict:
 @router.get("/library/folders")
 def library_folders() -> dict:
     """The sample folders Kumi may read (the `library_folders` setting as the guard keeps it), for the Sample folders
-    control: the producer's own setting, as `hermes kumi samples` shows it."""
-    return {"folders": _library_folders()}
+    control: the producer's own setting, as `hermes kumi samples` shows it. `missing` names those that aren't a folder
+    on this computer now (a drive unplugged, a folder moved), so the control can say so; a scan skips them anyway."""
+    folders = _library_folders()
+    return {"folders": folders, "missing": [folder for folder in folders if not Path(folder).is_dir()]}
 
 
 def _library_folder(body: object) -> dict:
@@ -348,7 +350,8 @@ def _palette_edit(state: Path, body: Any) -> str:
         if not sound_ids and not artifact_ids:
             raise palettes.Invalid("Gather takes sound ids or artifact ids.")
         folders = _library_folders() if artifact_ids else []
-        artifacts = [(each, snapshots.palette_artifact(state, each, folders)) for each in artifact_ids]
+        taken = palettes.names(state) if artifact_ids else ()
+        artifacts = snapshots.palette_artifacts(state, artifact_ids, folders, taken)
         if any(name is None for _, name in artifacts):
             raise palettes.Invalid("Kumi can't play that result here, so it can't go in the palette.")
         return palettes.gather(state, _palette_map(state) if sound_ids else None, sound_ids, artifacts)

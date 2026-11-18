@@ -70,7 +70,7 @@ class Routes(unittest.TestCase):
         from fastapi import HTTPException
 
         check = self.api._library_folder
-        self.assertEqual(self.api.library_folders(), {"folders": [str(self.library)]})
+        self.assertEqual(self.api.library_folders(), {"folders": [str(self.library)], "missing": []})
         # The answer is the folder's real place (macOS's temporary folder is reached through a link), and it's known
         # under whatever spelling the setting has.
         self.assertEqual(check({"folder": f' "{self.library}{os.sep}" '}),
@@ -86,7 +86,11 @@ class Routes(unittest.TestCase):
             with self.subTest(body=body), self.assertRaises(HTTPException) as bad:
                 check(body)
             self.assertEqual(bad.exception.status_code, 400)
-        self.assertEqual(self.api.library_folders(), {"folders": [str(self.library)]}, "a check adds nothing")
+        self.assertEqual(self.api.library_folders(), {"folders": [str(self.library)], "missing": []}, "a check adds nothing")
+        # A folder that isn't on this computer now (a drive unplugged) is named as missing; the setting keeps it.
+        gone = str(Path(self.tmp.name) / "Unplugged")
+        self.api._library_folders = lambda: [str(self.library), gone]
+        self.assertEqual(self.api.library_folders(), {"folders": [str(self.library), gone], "missing": [gone]})
 
     def test_status_focus_and_history_read_this_profiles_state_on_every_request(self) -> None:
         self.assertTrue(self.api.status()["connected"])
