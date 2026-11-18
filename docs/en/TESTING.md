@@ -40,7 +40,7 @@ Run from the repository root.
 | Command | What it does |
 | --- | --- |
 | `sh scripts/test-isolated.sh` (Windows: `./scripts/test-isolated.ps1`) | Every test with cargo-nextest, each in a process of its own, in a home of its own; arguments go to `cargo nextest run` (`KUMI_NEXTEST=0`: `cargo test`, a crate's tests in one process; `KUMI_NEXTEST_ARCHIVE`: tests built elsewhere, from a `cargo nextest archive`, unpacked into the checkout's `target/`) |
-| `sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'` | One test file of one crate: a crate's tests are one binary, `tests/it/`, a module a file |
+| `sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'` | One test file of one crate: a crate's tests are one binary, `tests/it/`, a module a file (kumi's are three: `tests/it/`, `tests/tui/`, `tests/app/`) |
 | `cargo fmt --all --check` | Formatting, as CI checks it |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lints; CI doesn't run them |
 | `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | A `RefCell` borrow held across an await; fails `Required CI` |

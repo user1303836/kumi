@@ -37,7 +37,7 @@ Windows では、いくつかのテストがシンボリックリンクを作成
 | コマンド | 内容 |
 | --- | --- |
 | `sh scripts/test-isolated.sh`（Windows では `./scripts/test-isolated.ps1`） | テスト専用のホームで、すべてのテストを cargo-nextest で一つずつ別のプロセスで実行します。引数は `cargo nextest run` に渡します（`KUMI_NEXTEST=0` では `cargo test`。クレートのテストが一つのプロセスで動きます。`KUMI_NEXTEST_ARCHIVE` では別の場所でビルドしたテストを `cargo nextest archive` から使い、チェックアウトの `target/` に展開します） |
-| `sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'` | 一つのクレートの、一つのテストファイルだけを実行します。クレートのテストは一つのバイナリ（`tests/it/`、ファイルごとに一つのモジュール）です |
+| `sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'` | 一つのクレートの、一つのテストファイルだけを実行します。クレートのテストは一つのバイナリ（`tests/it/`、ファイルごとに一つのモジュール）です（kumi のものは `tests/it/`、`tests/tui/`、`tests/app/` の三つ） |
 | `cargo fmt --all --check` | CI と同じようにフォーマットを確認します |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint。CI では実行しません |
 | `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | await をまたいで保持される `RefCell` の借用。`Required CI` を失敗させます |
