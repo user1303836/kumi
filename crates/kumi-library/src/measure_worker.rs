@@ -7,7 +7,13 @@ use super::{
 };
 use kumi_common::js::{json::stringify, string::head};
 use serde::{Deserialize, Serialize};
-use std::{cell::Cell, io, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    cell::Cell,
+    io,
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
     process::{Child, ChildStdin, ChildStdout, Command},
@@ -101,15 +107,22 @@ pub fn worker_program(role: &'static str, variable: &str) -> WorkerProgram {
     let filename = format!("kumi{}", std::env::consts::EXE_SUFFIX);
     let program = std::env::current_exe()
         .ok()
-        .and_then(|exe| {
-            exe.parent().map(|folder| {
-                // Cargo's integration tests are one directory below the binaries they exercise.
-                let folder = if folder.file_name().is_some_and(|n| n == "deps") { folder.parent().unwrap_or(folder) } else { folder };
-                folder.join(&filename)
-            })
-        })
+        .and_then(|exe| exe.parent().map(|folder| cargo_programs(folder).join(&filename)))
         .unwrap_or_else(|| filename.into());
     WorkerProgram::new(program, role)
+}
+/// Where the programs a test binary in `folder` exercises are, in Cargo's layout: one folder up from `<profile>/deps/`
+/// before Cargo 1.100, and since then `<profile>` from `<profile>/build/<package>/<hash>/out/`. Any other folder (an
+/// installed kumi's) is where they are.
+fn cargo_programs(folder: &Path) -> &Path {
+    let named = |path: Option<&Path>, name: &str| path.and_then(Path::file_name).is_some_and(|n| n == name);
+    if named(Some(folder), "deps") {
+        return folder.parent().unwrap_or(folder);
+    }
+    if named(Some(folder), "out") && named(folder.ancestors().nth(3), "build") {
+        return folder.ancestors().nth(4).unwrap_or(folder);
+    }
+    folder
 }
 /// A Job Object holding a worker, and so what it starts: ended together.
 #[cfg(windows)]

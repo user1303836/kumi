@@ -16,17 +16,22 @@ const NAME: &str = if cfg!(target_os = "macos") {
     "libreaper_kumi.so"
 };
 
-/// The library to load: the one named, or the one this test's build made beside it.
+/// The library to load: the one named, or the one this test's build made: in the profile's folder, which is one up from
+/// this test binary's `<profile>/deps/` before Cargo 1.100 and four up from its `<profile>/build/<package>/<hash>/out/`
+/// since; or beside it.
 fn artifact() -> PathBuf {
     if let Some(path) = std::env::var_os("REAPER_KUMI_ARTIFACT").filter(|path| !path.is_empty()) {
         return path.into();
     }
-    let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
-    let profile = deps.parent().unwrap().to_path_buf();
-    [profile.join(NAME), deps.join(NAME)]
+    let folder = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let profiles = [folder.parent(), folder.ancestors().nth(4).filter(|_| folder.ancestors().nth(3).is_some_and(|f| f.ends_with("build")))];
+    profiles
         .into_iter()
+        .flatten()
+        .map(|profile| profile.join(NAME))
+        .chain([folder.join(NAME)])
         .find(|path| path.is_file())
-        .unwrap_or_else(|| panic!("no {NAME} beside {}", deps.display()))
+        .unwrap_or_else(|| panic!("no {NAME} beside {} or in its profile's folder", folder.display()))
 }
 
 #[cfg(unix)]
