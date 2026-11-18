@@ -1098,6 +1098,17 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     observer.observe(element)
     return () => observer.disconnect()
   }, [hasPoints])
+  // The player's own height: it grows (a pad grid under Use on pad…), and what sits above it (the corner, the picks'
+  // actions, Grow's card) keeps above all of it, never over its name, Play or ×.
+  const [playerHeight, setPlayerHeight] = useState(0)
+  const playerOpen = Boolean(selected && model.sounds[selected])
+  useEffect(() => {
+    const element = playerRef.current
+    if (!playerOpen || !element) return setPlayerHeight(0)
+    const observer = new ResizeObserver(() => setPlayerHeight(element.offsetHeight))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [playerOpen])
 
   // No sounds yet: what builds the map, in the middle of the pane it will fill.
   if (!model.points.length) {
@@ -1141,7 +1152,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const hiddenCount = (map?.hidden ?? 0) + leavingCount
   // The picks' actions float beside the picks, never over them; with the picks out of view, at the map's foot: above
   // the corner, and above the player when there is one. Grow's card docks there too.
-  const foot = (chosen ? 120 : 10) + (cornerHeight > 0 ? cornerHeight + 8 : 0)
+  // Where the corner stands: at the map's foot, or above the player (at least its usual 110 px while it measures).
+  const cornerBottom = chosen ? Math.max(110, playerHeight) + 18 : 10
+  const foot = cornerBottom + (cornerHeight > 0 ? cornerHeight + 8 : 0)
   // A find's card is in the top column, so with one open the picks' actions keep below the whole column, not just the legend.
   const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, matches.length > 0 ? Math.max(topInset, columnBottom) : topInset, foot)
   clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null
@@ -1427,7 +1440,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       )}
       {selected && chosen && (
         // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
-        <div style={{ position: 'absolute', left: 10, right: 10 + coverRight, bottom: 10, zIndex: 1, display: 'flex', justifyContent: 'center', pointerEvents: 'none', transition: still ? 'none' : 'right 260ms cubic-bezier(.2,.8,.2,1)' }}>
+        <div style={{ position: 'absolute', left: 10, right: 10 + coverRight, bottom: 10, zIndex: 2, display: 'flex', justifyContent: 'center', pointerEvents: 'none', transition: still ? 'none' : 'right 260ms cubic-bezier(.2,.8,.2,1)' }}>
           <div ref={playerRef} style={{ width: 'min(640px, 100%)' }}>
             <Player
               actions={actions?.(selected, chosen)}
@@ -1452,7 +1465,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           stands on its hint line while Grow names its sounds: which one this click names, and a way out. Last here,
           so Tab from the map still goes to the picks' actions and the player first, as the keys' hint says. */}
       <Corner
-        bottom={chosen ? 120 : 10}
+        bottom={cornerBottom}
         box={cornerRef}
         cover={coverRight}
         still={still}

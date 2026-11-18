@@ -8209,6 +8209,15 @@
       observer.observe(element);
       return () => observer.disconnect();
     }, [hasPoints]);
+    const [playerHeight, setPlayerHeight] = useState(0);
+    const playerOpen = Boolean(selected && model.sounds[selected]);
+    useEffect(() => {
+      const element = playerRef.current;
+      if (!playerOpen || !element) return setPlayerHeight(0);
+      const observer = new ResizeObserver(() => setPlayerHeight(element.offsetHeight));
+      observer.observe(element);
+      return () => observer.disconnect();
+    }, [playerOpen]);
     if (!model.points.length) {
       return /* @__PURE__ */ jsx("div", { style: { ...S.muted, fontSize: 13, flex: 1, height: "100%", minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }, children: /* @__PURE__ */ jsxs("div", { style: { maxWidth: 380 }, children: [
         empty,
@@ -8235,7 +8244,8 @@
     };
     const countWords = shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0));
     const hiddenCount = (map?.hidden ?? 0) + leavingCount;
-    const foot = (chosen ? 120 : 10) + (cornerHeight > 0 ? cornerHeight + 8 : 0);
+    const cornerBottom = chosen ? Math.max(110, playerHeight) + 18 : 10;
+    const foot = cornerBottom + (cornerHeight > 0 ? cornerHeight + 8 : 0);
     const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, matches.length > 0 ? Math.max(topInset, columnBottom) : topInset, foot);
     clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null;
     return /* @__PURE__ */ jsxs(
@@ -8497,7 +8507,7 @@
             }
           ),
           selected && chosen && // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
-          /* @__PURE__ */ jsx("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 1, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx("div", { ref: playerRef, style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx(
+          /* @__PURE__ */ jsx("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 2, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx("div", { ref: playerRef, style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx(
             Player,
             {
               actions: actions?.(selected, chosen),
@@ -8518,7 +8528,7 @@
           /* @__PURE__ */ jsx(
             Corner,
             {
-              bottom: chosen ? 120 : 10,
+              bottom: cornerBottom,
               box: cornerRef,
               cover: coverRight,
               still,
