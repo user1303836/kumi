@@ -235,7 +235,7 @@ function Dashboard() {
                   <Button disabled={palette.marked.has(id)} onClick={() => palette.gather([id])} tip={t('dock.addTitle')}>
                     {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
                   </Button>
-                  {request && <CopyButton label={t('dashboard.copyReference')} text={request} />}
+                  {request && <CopyButton label={t('dashboard.copyUse')} text={request} />}
                 </>
               )
             }}
@@ -300,7 +300,7 @@ function Dashboard() {
                   <Button disabled={kept} onClick={() => palette.keep(result)} tip={kept ? undefined : t('make.keepTitle')}>
                     {kept ? t('make.kept') : t('make.keep')}
                   </Button>
-                  {request && <CopyButton label={t('make.copyUse')} text={request} />}
+                  {request && <CopyButton label={t('dashboard.copyUse')} text={request} />}
                 </>
               )
             }}
@@ -389,7 +389,7 @@ function Dashboard() {
               said={state.paletteSaid}
               use={item => {
                 const request = itemReference(item, state.palette?.map_revision ?? null)
-                return request ? <CopyButton kind="quiet" label={t('dashboard.copyReference')} text={request} /> : null
+                return request ? <CopyButton kind="quiet" label={t('dashboard.copyUse')} text={request} /> : null
               }}
             />
           )}
@@ -417,7 +417,7 @@ function Dashboard() {
               tempo={state.focus?.transport?.tempo}
               use={result => {
                 const request = useRequest(result)
-                return request ? <CopyButton label={t('make.copyUse')} text={request} /> : null
+                return request ? <CopyButton label={t('dashboard.copyUse')} text={request} /> : null
               }}
             />
           </div>
