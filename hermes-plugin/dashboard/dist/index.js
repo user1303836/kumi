@@ -8595,7 +8595,7 @@
     }, [hasPoints]);
     const hoverAt = hover ? hover.index : null;
     const constellation = useMemo(() => hoverAt === null || tiles ? [] : nearestTo(arranged.points, hoverAt, STARS, (index) => mask[index] === 1), [arranged, hoverAt, mask, tiles]);
-    useEffect(() => {
+    const drawNow = () => {
       const canvas = canvasRef.current;
       if (!canvas || !view || size.width === 0) return;
       const ratio = window.devicePixelRatio || 1;
@@ -8931,6 +8931,30 @@
         context.globalAlpha = 1;
       }
       overlayFollow.current?.();
+    };
+    const drawTask = useRef(null);
+    useEffect(() => {
+      const channel = new MessageChannel();
+      const task = { port: channel.port2, draw: null };
+      channel.port1.onmessage = () => {
+        const draw = task.draw;
+        task.draw = null;
+        draw?.();
+      };
+      drawTask.current = task;
+      return () => {
+        channel.port1.onmessage = null;
+        channel.port1.close();
+        channel.port2.close();
+        drawTask.current = null;
+      };
+    }, []);
+    useEffect(() => {
+      const task = drawTask.current;
+      if (!task) return;
+      const waiting = task.draw !== null;
+      task.draw = drawNow;
+      if (!waiting) task.port.postMessage(null);
     }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight, grow?.from, grow?.to, grow?.handle, grow?.choosing]);
     const at = (event) => {
       const rect = canvasRef.current?.getBoundingClientRect();
