@@ -8,6 +8,7 @@
     muted: "var(--color-muted-foreground)",
     faint: "var(--color-muted-foreground)",
     border: "var(--color-border)",
+    hairline: "color-mix(in srgb, var(--color-border) 60%, transparent)",
     card: "var(--color-card)",
     raised: "var(--color-popover, var(--color-card))",
     chip: "var(--color-muted)",
@@ -87,6 +88,7 @@
       history: "HISTORY",
       undoable: (n) => `· ${n} can be undone`,
       undo: "Undo",
+      undoAll: (n) => `Undo all ${n}`,
       undoTitle: "Ask Hermes to undo this change",
       undoChangeTitle: (n) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
       undoLabel: (change) => `Undo ${change}`,
@@ -133,6 +135,9 @@
       restored: "Kumi put back what it changed meanwhile.",
       restoreUnsure: "Kumi isn’t sure it put everything back.",
       restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
+      moreSteps: (n) => n === 1 ? "1 more step" : `${n} more steps`,
+      beforeRestart: "Before Kumi restarted",
+      restartedSinceAll: (daw) => `Kumi can't undo these safely: undo them in ${daw} if they're still its latest steps, or ask Hermes to set them back.`,
       dawUndo: (daw) => `Next in ${daw}'s Undo, if nothing has changed there since`,
       dawUndoTitle: (daw, keys) => `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
       byHand: (daw) => `Remove it by hand in ${daw}, or undo the later changes first.`,
@@ -881,6 +886,7 @@
       history: "HISTORY",
       undoable: (n) => `· ${n} 件取り消せます`,
       undo: "取り消す",
+      undoAll: (n) => `${n} ステップを取り消す`,
       undoTitle: "この変更の取り消しを Hermes に頼む",
       undoChangeTitle: (n) => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
       undoLabel: (change) => `${change} を取り消す`,
@@ -926,6 +932,9 @@
       lookFirst: "次の変更の前に、Hermes にもう一度確認してもらってください。",
       restored: "その間に変えたものは Kumi が元に戻しました。",
       restartedSince: (daw) => `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
+      moreSteps: (n) => `ほか ${n} ステップ`,
+      beforeRestart: "Kumi の再起動前",
+      restartedSinceAll: (daw) => `これらは Kumi が安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
       restoreUnsure: "すべて元に戻せたか Kumi は確信できません。",
       dawUndo: (daw) => `${daw} の取り消しで次の操作（その後 ${daw} で何も変えていなければ）`,
       dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
@@ -1666,6 +1675,7 @@
       history: "HISTORY",
       undoable: (n) => `· ${n} 项可撤销`,
       undo: "撤销",
+      undoAll: (n) => `全部撤销（${n} 步）`,
       undoTitle: "让 Hermes 撤销这次改动",
       undoChangeTitle: (n) => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
       undoLabel: (change) => `撤销 ${change}`,
@@ -1711,6 +1721,9 @@
       lookFirst: "下一次改动之前，请让 Hermes 重新查看。",
       restored: "Kumi 已还原期间做出的改动。",
       restartedSince: (daw) => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
+      moreSteps: (n) => `另外 ${n} 步`,
+      beforeRestart: "Kumi 重启之前",
+      restartedSinceAll: (daw) => `Kumi 无法安全撤销这些改动：如果它们仍是 ${daw} 中的最后几步，请在 ${daw} 中撤销，或让 Hermes 把它们改回去。`,
       restoreUnsure: "Kumi 不确定是否已全部还原。",
       dawUndo: (daw) => `${daw} 撤销中的下一步，前提是之后那里没有任何改动`,
       dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
@@ -2585,6 +2598,10 @@
     if (status.stale && status.owner) return { tone: "warn", text: [daw, project, t("chip.notAnswering")].filter(Boolean).join(" · ") };
     if (!status.stale && status.setup?.daw_open === false) return { tone: "muted", text: t("chip.dawClosed", daw) };
     return { tone: "muted", text: t("chip.notConnected", daw) };
+  }
+  function statusNamesProject(status) {
+    if (!status || !clean(status.project?.name ?? "", 40)) return false;
+    return Boolean(status.connected || status.stale && (status.running === false || status.owner));
   }
 
   // src/shared/atlas/first.ts
@@ -3842,8 +3859,8 @@
     return useContext(I18n);
   }
   var S = {
-    section: { display: "flex", flexDirection: "column", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${T.border}` },
-    heading: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: T.muted },
+    section: { display: "flex", flexDirection: "column", gap: 8, padding: 12, borderBottom: `1px solid ${T.hairline}` },
+    heading: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, lineHeight: "14px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: T.muted },
     row: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 },
     // A message can hold a URL or a path with no place to break: it wraps anywhere rather than widen the pane.
     text: { fontSize: 12.5, color: T.text, lineHeight: 1.45, overflowWrap: "anywhere" },
@@ -3855,7 +3872,7 @@
   };
   var FOCUSABLE = "kumi-focusable";
   function FocusStyle() {
-    return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}@keyframes kumi-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}.kumi-slide{animation:kumi-slide 1.6s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell,.kumi-slide{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
+    return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}.kumi-btn:hover:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.14),rgba(127,127,127,.14))}.kumi-btn:active:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.24),rgba(127,127,127,.24))}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}@keyframes kumi-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}.kumi-slide{animation:kumi-slide 1.6s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell,.kumi-slide{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
   }
   function Chip({ children, title, tone }) {
     const color = tone === "accent" ? T.accent : tone === "good" ? T.good : tone === "warn" ? T.warn : tone === "bad" ? T.bad : T.secondary;
@@ -3870,15 +3887,12 @@
     const pulse = beating(beat, color);
     return /* @__PURE__ */ jsx("span", { "aria-hidden": !title, className: pulse.className, title, style: { display: "inline-block", width: size, height: size, borderRadius: "50%", background: color, flex: "none", ...pulse.style } });
   }
-  function TextButton({
-    children,
-    onClick,
-    title,
-    label,
-    pressed,
-    disabled,
-    strong
-  }) {
+  var TYPE = {
+    body: { fontSize: 13, lineHeight: "18px" },
+    small: { fontSize: 12, lineHeight: "16px" },
+    caption: { fontSize: 11, lineHeight: "14px" }
+  };
+  function useRequestClick(onClick) {
     const [busy, setBusy] = useState(false);
     const asks = useRef(false);
     const click = (event) => {
@@ -3889,6 +3903,18 @@
       setBusy(true);
       void Promise.resolve(answer).catch(() => void 0).finally(() => setBusy(false));
     };
+    return { busy, click };
+  }
+  function TextButton({
+    children,
+    onClick,
+    title,
+    label,
+    pressed,
+    disabled,
+    strong
+  }) {
+    const { busy, click } = useRequestClick(onClick);
     return /* @__PURE__ */ jsx(
       "button",
       {
@@ -3992,6 +4018,18 @@
     };
   }
 
+  // src/dashboard/controls.tsx
+  var KIND = {
+    primary: { background: T.accent, color: "var(--color-primary-foreground, #fff)" },
+    secondary: { background: T.chip, color: T.text },
+    quiet: { background: "transparent", color: T.secondary },
+    destructive: { background: `color-mix(in srgb, ${T.bad} 14%, transparent)`, color: T.bad }
+  };
+  var CHIP = { fact: void 0, kumi: "accent", good: "good", warn: "warn", bad: "bad" };
+  function Badge({ children, tone = "fact", tip }) {
+    return /* @__PURE__ */ jsx(Chip, { title: typeof tip === "string" ? tip : void 0, tone: CHIP[tone], children });
+  }
+
   // src/shared/HistoryView.tsx
   var STATE = {
     applied: { mark: "✓", tone: "good", word: "history.applied" },
@@ -4013,39 +4051,40 @@
     return { mark: "·", tone: "muted", word: item.state ? clean(item.state, 20) : t("history.recorded") };
   }
   var TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
-  function FocusView({ focus, now, loading: loading2 = false }) {
+  function FocusView({ focus, now, loading: loading2 = false, project = true }) {
     const t = useT();
     const catchUp = catchUpLines(focus);
     if (loading2 && !focus) return /* @__PURE__ */ jsx(Pending, { label: t("pane.reading") });
     if (!focus || !focus.focus && !focus.project && !catchUp.lines.length) {
-      return /* @__PURE__ */ jsx("span", { style: S.muted, children: t("focus.nothing") });
+      return /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, color: T.muted }, children: t("focus.nothing") });
     }
     const transport = focus.transport;
     const path = focusPath(focus);
     const parameter = focusParameter(focus);
     const busy = nameOf(focus.focus?.busy ?? void 0);
     const meter = nameOf(transport?.meter ?? void 0);
-    return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 6, opacity: focus.stale ? 0.6 : 1 }, children: [
-      /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 7 }, children: [
-        /* @__PURE__ */ jsx(Dot, { color: colorOf(focus.focus?.track) ?? T.faint, size: 9 }),
-        /* @__PURE__ */ jsx("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: path.length ? path.join(" › ") : t("focus.nothingSelected") })
+    return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 8, opacity: focus.stale ? 0.6 : 1 }, children: [
+      /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
+        /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 8 }, children: [
+          /* @__PURE__ */ jsx(Dot, { color: colorOf(focus.focus?.track) ?? T.faint, size: 8 }),
+          /* @__PURE__ */ jsx("span", { style: { ...TYPE.body, ...S.ellipsis, color: T.text, fontWeight: 600 }, children: path.length ? path.join(" › ") : t("focus.nothingSelected") })
+        ] }),
+        parameter && /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, ...S.ellipsis, color: T.muted, paddingLeft: 16 }, children: parameter })
       ] }),
-      parameter && /* @__PURE__ */ jsx("span", { style: { ...S.muted, ...S.ellipsis }, children: parameter }),
       /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 4, flexWrap: "wrap" }, children: [
-        focus.project?.name && /* @__PURE__ */ jsx(Chip, { title: t("focus.project"), children: clean(focus.project.name, 40) }),
-        focusPlace(focus).map((place, index) => /* @__PURE__ */ jsx(Chip, { children: place }, index)),
-        typeof transport?.playing === "boolean" && /* @__PURE__ */ jsx(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? t("focus.playing") : t("focus.stopped") }),
-        bpm(transport?.tempo) && /* @__PURE__ */ jsx(Chip, { children: bpm(transport?.tempo) }),
-        meter && /* @__PURE__ */ jsx(Chip, { children: clean(meter, 12) }),
-        busy && /* @__PURE__ */ jsx(Chip, { tone: "warn", title: t("focus.busy"), children: clean(busy, 40) }),
-        focus.stale && (focus.running === false ? /* @__PURE__ */ jsx(Chip, { children: t("focus.kumiStopped") }) : /* @__PURE__ */ jsx(Chip, { tone: "warn", children: t("focus.notAnswering") }))
+        project && focus.project?.name && /* @__PURE__ */ jsx(Badge, { tip: t("focus.project"), children: clean(focus.project.name, 40) }),
+        focusPlace(focus).map((place, index) => /* @__PURE__ */ jsx(Badge, { children: place }, index)),
+        typeof transport?.playing === "boolean" && /* @__PURE__ */ jsx(Badge, { tone: transport.playing ? "good" : "fact", children: transport.playing ? t("focus.playing") : t("focus.stopped") }),
+        bpm(transport?.tempo) && /* @__PURE__ */ jsx(Badge, { children: bpm(transport?.tempo) }),
+        meter && /* @__PURE__ */ jsx(Badge, { children: clean(meter, 12) }),
+        busy && /* @__PURE__ */ jsx(Badge, { tip: t("focus.busy"), tone: "warn", children: clean(busy, 40) })
       ] }),
       catchUp.lines.length > 0 && /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
-        /* @__PURE__ */ jsx("span", { style: S.faint, children: t("focus.since") }),
-        catchUp.lines.map((line, index) => /* @__PURE__ */ jsx("span", { style: { ...S.muted, ...S.ellipsis }, children: line }, index)),
-        catchUp.more > 0 && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("focus.more", catchUp.more) })
+        /* @__PURE__ */ jsx("span", { style: { ...TYPE.caption, color: T.faint }, children: t("focus.since") }),
+        catchUp.lines.map((line, index) => /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, ...S.ellipsis, color: T.muted }, children: line }, index)),
+        catchUp.more > 0 && /* @__PURE__ */ jsx("span", { style: { ...TYPE.caption, color: T.faint }, children: t("focus.more", catchUp.more) })
       ] }),
-      focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
+      focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx("span", { style: { ...TYPE.caption, color: T.faint }, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
     ] });
   }
   function undoKeys(target) {
@@ -4059,6 +4098,71 @@
       return /* @__PURE__ */ jsx("span", { title: t("history.byHandTitle", app), style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: t("history.byHand", app) });
     }
     return /* @__PURE__ */ jsx("span", { title: t("history.dawUndoTitle", app, keys), style: { ...S.muted, whiteSpace: "normal" }, children: t("history.dawUndo", app) });
+  }
+  function RowWords({ item, live, daw, target, now, detail, restartSaid }) {
+    const t = useT();
+    const title = clean(item.title ?? item.label ?? item.id, 300);
+    const said = title.toLowerCase();
+    const track2 = nameOf(item.track);
+    const showTrack = track2 && !said.includes(track2.toLowerCase());
+    const family = item.family && !said.includes(item.family.toLowerCase()) ? clean(item.family, 16) : "";
+    const dawUndo = item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? item.daw_undo : null;
+    const note = { ...TYPE.small, color: T.muted, whiteSpace: "normal", overflowWrap: "anywhere" };
+    return /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsx(Clamp, { style: { ...TYPE.body, color: item.state === "undone" ? T.muted : T.text, textDecoration: item.state === "undone" ? "line-through" : void 0 }, text: title }),
+      /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6 }, children: [
+        showTrack && /* @__PURE__ */ jsx(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
+        /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, ...S.ellipsis, color: T.faint }, children: [showTrack && clean(track2, 24), family, ago(item.at, now, t)].filter(Boolean).join(" · ") })
+      ] }),
+      item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx("span", { style: { ...note, color: T.warn }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : item.note ? (
+        // The runtime's own words for any other row (why an undo didn't happen, say), why a script's can't (Kumi never
+        // undoes one, CC-19); a restart's is said once, above the rows it covers.
+        /* @__PURE__ */ jsx("span", { style: note, children: clean(item.note, 400) })
+      ) : item.family === "script" ? /* @__PURE__ */ jsx("span", { style: note, children: t("history.scriptUndo", dawName(daw, t)) }) : !restartSaid && restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: note, children: t("history.restartedSince", dawName(daw, t)) }),
+      item.copy?.file ? /* @__PURE__ */ jsx("span", { style: note, children: t("history.copyKept", clean(item.copy.file.split(/[/\\]/).pop() ?? "", 120)) }) : null,
+      dawUndo && /* @__PURE__ */ jsx(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) }),
+      detail?.(item)
+    ] });
+  }
+  function Mark({ item, live }) {
+    const t = useT();
+    const state = stateOf(item, t, live);
+    return /* @__PURE__ */ jsx("span", { "aria-label": state.word, title: state.word, style: { ...TYPE.body, width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark });
+  }
+  function Change({ rows, live, daw, target, now, action, detail, restartSaid }) {
+    const t = useT();
+    const [open, setOpen] = useState(false);
+    const head = undoRowOf(rows) ?? rows[0];
+    const others = rows.filter((row) => row !== head);
+    const dawUndo = head.state === "applied" && (head.daw_undo === "next" || head.daw_undo === "buried");
+    const words = { live, daw, target, now, detail, restartSaid };
+    return /* @__PURE__ */ jsxs("li", { style: { display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderTop: `1px solid ${T.hairline}` }, children: [
+      /* @__PURE__ */ jsx(Mark, { item: head, live }),
+      /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }, children: [
+        /* @__PURE__ */ jsx(RowWords, { item: head, ...words }),
+        others.length > 0 && /* @__PURE__ */ jsxs(Fragment2, { children: [
+          /* @__PURE__ */ jsxs(
+            "button",
+            {
+              "aria-expanded": open,
+              className: FOCUSABLE,
+              onClick: () => setOpen(!open),
+              type: "button",
+              style: { ...TYPE.small, alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 4, minHeight: 24, padding: 0, border: "none", background: "transparent", color: T.muted, cursor: "pointer", fontFamily: "inherit" },
+              children: [
+                /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { display: "inline-block", width: 10, transform: open ? "rotate(90deg)" : "none", transition: "transform 120ms" }, children: "▸" }),
+                t("history.moreSteps", others.length)
+              ]
+            }
+          ),
+          open && /* @__PURE__ */ jsx("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column" }, children: others.map((row) => /* @__PURE__ */ jsxs("li", { style: { display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", borderTop: `1px solid ${T.hairline}` }, children: [
+            /* @__PURE__ */ jsx(Mark, { item: row, live }),
+            /* @__PURE__ */ jsx("div", { style: { display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }, children: /* @__PURE__ */ jsx(RowWords, { item: row, ...words }) })
+          ] }, row.id)) })
+        ] })
+      ] }),
+      dawUndo ? null : action?.(head, rows)
+    ] });
   }
   function HistoryView({
     history,
@@ -4074,32 +4178,24 @@
     const items = history?.items ?? [];
     if (loading2 && !history) return /* @__PURE__ */ jsx(Pending, { label: t("pane.reading") });
     if (!items.length) {
-      return /* @__PURE__ */ jsx("span", { style: S.muted, children: t("history.empty") });
+      return /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, color: T.muted }, children: t("history.empty") });
     }
-    return /* @__PURE__ */ jsx("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }, children: items.map((item) => {
-      const state = stateOf(item, t, live);
-      const track2 = nameOf(item.track);
-      const dawUndo = item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? item.daw_undo : null;
-      return /* @__PURE__ */ jsxs("li", { style: { ...S.row, alignItems: "flex-start", gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
-        /* @__PURE__ */ jsx("span", { "aria-label": state.word, title: state.word, style: { width: 14, lineHeight: "18px", textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
-        /* @__PURE__ */ jsxs("span", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }, children: [
-          /* @__PURE__ */ jsx(Clamp, { style: { ...S.text, textDecoration: item.state === "undone" ? "line-through" : void 0 }, text: clean(item.title ?? item.label ?? item.id, 300) }),
-          /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 5 }, children: [
-            track2 && /* @__PURE__ */ jsx(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
-            /* @__PURE__ */ jsx("span", { style: { ...S.faint, ...S.ellipsis }, children: [track2 && clean(track2, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now, t)].filter(Boolean).join(" · ") })
-          ] }),
-          item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : (
-            // The runtime's own words for any other row (why an undo didn't happen, say), why a script's can't (Kumi
-            // never undoes one, CC-19), or why a restart's can't.
-            item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 400) }) : item.family === "script" ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.scriptUndo", dawName(daw, t)) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
-          ),
-          item.copy?.file ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.copyKept", clean(item.copy.file.split(/[/\\]/).pop() ?? "", 120)) }) : null,
-          dawUndo && /* @__PURE__ */ jsx(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) }),
-          detail?.(item)
+    const changes = changesOf(items);
+    const restarted = (rows) => restartedSince(undoRowOf(rows) ?? rows[0], live);
+    const recent = changes.filter((rows) => !restarted(rows));
+    const before = changes.filter(restarted);
+    const list = (group, restartSaid) => /* @__PURE__ */ jsx("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column" }, children: group.map((rows) => /* @__PURE__ */ jsx(Change, { action, daw, detail, live, now, restartSaid, rows, target }, rows[rows.length - 1].id)) });
+    return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column" }, children: [
+      recent.length > 0 && list(recent, false),
+      before.length > 0 && /* @__PURE__ */ jsxs("div", { "aria-label": t("history.beforeRestart"), role: "group", style: { display: "flex", flexDirection: "column", gap: 4, marginTop: recent.length ? 8 : 0 }, children: [
+        /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 8, ...TYPE.caption, color: T.faint, textTransform: "uppercase", letterSpacing: "0.06em" }, children: [
+          t("history.beforeRestart"),
+          /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { flex: 1, height: 1, background: T.hairline } })
         ] }),
-        dawUndo ? null : action?.(item)
-      ] }, item.id);
-    }) });
+        /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, color: T.muted, whiteSpace: "normal", overflowWrap: "anywhere" }, children: t("history.restartedSinceAll", dawName(daw, t)) }),
+        list(before, true)
+      ] })
+    ] });
   }
 
   // src/shared/atlas/color.ts
@@ -9613,7 +9709,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
         audition.dispose();
       };
     }, [store, audition]);
-    const words = chipWords(state.status, state.focus?.transport?.tempo, t);
+    const words = chipWords(state.status, void 0, t);
     const tone = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint }[words.tone];
     const connected = Boolean(state.status?.connected);
     if (state.available === false) {
@@ -9645,14 +9741,14 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       ] }),
       /* @__PURE__ */ jsxs("div", { style: { display: "grid", gridTemplateColumns: "minmax(260px, 1fr) minmax(320px, 2fr)", gap: 12, alignItems: "stretch" }, children: [
         /* @__PURE__ */ jsxs("div", { style: { border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: "hidden", alignSelf: "start" }, children: [
-          /* @__PURE__ */ jsx(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx(FocusView, { focus: state.focus, loading: state.focus === null && !state.failed.focus, now }) }),
+          /* @__PURE__ */ jsx(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx(FocusView, { focus: state.focus, loading: state.focus === null && !state.failed.focus, now, project: !statusNamesProject(state.status) }) }),
           /* @__PURE__ */ jsx(Section, { title: t("pane.history"), children: /* @__PURE__ */ jsx(
             HistoryView,
             {
-              action: (item) => {
-                const rows = changesOf(state.history?.items ?? []).find((change) => change.includes(item));
-                return rows && undoRowOf(rows) === item && canUndoChange(state.status, rows) ? /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyUndo"), text: undoRequest(item) }) : null;
-              },
+              action: (head, rows) => (
+                // One Copy undo per change, on its head, as in Desktop's pane (CC-3 A2).
+                canUndoChange(state.status, rows) ? /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyUndo"), text: undoRequest(head) }) : null
+              ),
               daw: state.status?.daw,
               history: state.history,
               loading: state.history === null && !state.failed.history,

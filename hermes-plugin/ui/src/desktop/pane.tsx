@@ -1,15 +1,16 @@
 // The Kumi pane beside the chat: is Kumi connected, what the producer is looking at (FOCUS), and what Kumi changed
 // (HISTORY), each change with its undo. Undo, setup and connect only put a request in Kumi's chat.
 import type { PluginContext } from '@hermes/plugin-sdk'
+import { Button } from '@kumi/controls'
+import { T } from '@kumi/theme'
 import { useEffect, useState } from 'react'
 
-import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, STARTER_REQUESTS, undoRequest, undoRowOf } from '../shared/format.ts'
+import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, STARTER_REQUESTS, statusNamesProject, undoRequest } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { useKumi } from '../shared/hooks.ts'
 import type { KumiState, KumiStore } from '../shared/store.ts'
 import { nextSteps, setupWords } from '../shared/steps.ts'
-import { Dot, S, Section, TextButton, useT } from '../shared/ui.tsx'
-import { T } from '@kumi/theme'
+import { Dot, S, Section, TYPE, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { JobsView } from './jobs.tsx'
 import { PendingScriptView, SavedScript } from './script.tsx'
@@ -40,25 +41,24 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
   const now = useNow()
   if (state.available === false) {
     return (
-      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span style={S.text}>{t('pane.agentOff')}</span>
-        <span style={S.muted}>{t('pane.agentOffHow')}</span>
+      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <span style={{ ...TYPE.body, color: T.text }}>{t('pane.agentOff')}</span>
+        <span style={{ ...TYPE.small, color: T.muted }}>{t('pane.agentOffHow')}</span>
       </div>
     )
   }
   if (state.available === null) {
-    return <div style={{ ...S.muted, padding: 14 }}>{t('pane.reading')}</div>
+    return <div style={{ ...TYPE.small, color: T.muted, padding: 12 }}>{t('pane.reading')}</div>
   }
-  const words = chipWords(state.status, state.focus?.transport?.tempo, t)
+  // One home per fact (P6): the status line names the DAW and the project; FOCUS keeps the view and the transport, so
+  // the tempo is FOCUS's, and the project's chip shows there only while the status line doesn't name it.
+  const words = chipWords(state.status, undefined, t)
   const steps = nextSteps(state, t)
   const session = ownerSession(state)
   const connected = Boolean(state.status?.connected)
   const setupMessage = setupWords(state)
-  // One Undo per change (CC-3 A2): on the row it starts from (its newest not yet undone), for all its rows left,
-  // counted as one.
-  const changes = changesOf(state.history?.items ?? [])
-  const changeOf = new Map(changes.flatMap(rows => rows.map(row => [row, rows] as const)))
-  const undoable = changes.filter(rows => canUndoChange(state.status, rows)).length
+  const undoable = changesOf(state.history?.items ?? []).filter(rows => canUndoChange(state.status, rows)).length
+  const note = { ...TYPE.small, color: T.muted, overflowWrap: 'anywhere' } as const
   return (
     <div style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', color: T.text }}>
       {/* A script waiting for its approval comes first, whole (CC-19): it's what the producer is deciding on now. */}
@@ -67,14 +67,15 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
         <div style={{ ...S.row, gap: 8 }}>
           {/* On the DAW's beat while it plays; steady when it's stopped, or not connected. */}
           <Dot beat={connected ? beatSeconds(state.focus?.transport) : null} color={TONE[words.tone]} size={8} />
-          <span style={{ ...S.text, ...S.ellipsis, fontWeight: 600, flex: 1 }}>{words.text}</span>
-          {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
+          <span style={{ ...TYPE.body, ...S.ellipsis, fontWeight: 600, flex: '1 1 auto' }}>{words.text}</span>
+          {/* The version gives way first when the pane is narrow: the project's name is what's read. */}
+          {state.status?.runtime?.version && <span style={{ ...TYPE.caption, ...S.ellipsis, color: T.faint, flex: '0 100 auto' }}>Kumi {state.status.runtime.version}</span>}
         </div>
-        {setupMessage && <span style={S.muted}>{setupMessage}</span>}
-        {state.error && <span style={{ ...S.muted, color: T.warn }}>{t('pane.backendError', state.error)}</span>}
+        {setupMessage && <span style={note}>{setupMessage}</span>}
+        {state.error && <span style={{ ...note, color: T.warn }}>{t('pane.backendError', state.error)}</span>}
         {state.status?.unsure && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ ...S.muted, color: T.warn }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+            <span style={{ ...note, color: T.warn }}>
               {[
                 t('pane.unsure', clean(state.status.unsure.op ?? t('pane.unsureOp'), 40), state.status.unsure.reason ? clean(state.status.unsure.reason, 160) : ''),
                 cleanupWords(state.status.unsure.cleanup, t),
@@ -83,23 +84,21 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
                 .filter(Boolean)
                 .join(' ')}
             </span>
-            <div style={S.row}>
-              <TextButton onClick={() => ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session })}>{t('pane.lookAgain')}</TextButton>
-            </div>
+            <Button onClick={() => ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session })}>{t('pane.lookAgain')}</Button>
           </div>
         )}
         {steps.length > 0 && (
-          <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
+          <div style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
             {steps.map(step => (
-              <TextButton key={step.request} onClick={() => ask(ctx, step.request, { send: true, session: connected ? session : null })} strong={steps.length === 1}>
+              <Button key={step.request} kind={steps.length === 1 ? 'primary' : 'secondary'} onClick={() => ask(ctx, step.request, { send: true, session: connected ? session : null })}>
                 {step.label}
-              </TextButton>
+              </Button>
             ))}
           </div>
         )}
       </div>
       <Section title={t('pane.focus')}>
-        <FocusView focus={state.focus} loading={state.focus === null && !state.failed.focus} now={now} />
+        <FocusView focus={state.focus} loading={state.focus === null && !state.failed.focus} now={now} project={!statusNamesProject(state.status)} />
       </Section>
       {Object.keys(state.jobs).length > 0 && (
         <Section title={t('pane.jobs')}>
@@ -109,7 +108,7 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
       <Section
         title={
           <>
-            {t('pane.history')} <span style={{ textTransform: 'none', letterSpacing: 0 }}>{undoable ? t('pane.undoable', undoable) : ''}</span>
+            {t('pane.history')} <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>{undoable ? t('pane.undoable', undoable) : ''}</span>
           </>
         }
       >
@@ -121,37 +120,33 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
           now={now}
           target={state.setup?.target}
           detail={item => (item.script ? <SavedScript item={item} store={store} /> : null)}
-          action={item => {
-            const rows = changeOf.get(item)
-            if (!rows || undoRowOf(rows) !== item || !canUndoChange(state.status, rows)) return null
+          action={(head, rows) => {
+            // One Undo per change (CC-3 A2), on its head: it undoes every step left, and says so when there are several.
+            if (!canUndoChange(state.status, rows)) return null
             const left = rows.filter(row => row.state !== 'undone').length
             return (
-              <TextButton
-                label={t('pane.undoLabel', clean(item.title ?? item.label ?? item.id, 120))}
-                onClick={() => ask(ctx, undoRequest(item), { send: true, session })}
-                title={left > 1 ? t('pane.undoChangeTitle', left) : t('pane.undoTitle')}
-              >
-                {t('pane.undo')}
-              </TextButton>
+              <Button label={t('pane.undoLabel', clean(head.title ?? head.label ?? head.id, 120))} onClick={() => ask(ctx, undoRequest(head), { send: true, session })} tip={left > 1 ? t('pane.undoChangeTitle', left) : undefined}>
+                {left > 1 ? t('pane.undoAll', left) : t('pane.undo')}
+              </Button>
             )
           }}
         />
         {/* Rows are kept while Kumi is away, but undoing one needs it back: said under them, and only when there are some. */}
-        {!connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && <span style={S.faint}>{t('pane.undoNeedsConnection')}</span>}
+        {!connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && <span style={{ ...TYPE.small, color: T.faint }}>{t('pane.undoNeedsConnection')}</span>}
         {/* Nothing in HISTORY yet, with Kumi connected: three requests to try, each only put in the chat to send. */}
         {connected && state.history !== null && (state.history.items?.length ?? 0) === 0 && (
-          <div style={{ ...S.row, gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-            <span style={S.faint}>{t('pane.starters')}</span>
+          <div style={{ ...S.row, gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+            <span style={{ ...TYPE.small, color: T.faint, marginRight: 4 }}>{t('pane.starters')}</span>
             {STARTER_REQUESTS.map(starter => (
-              <TextButton key={starter.key} onClick={() => ask(ctx, starter.request, { send: false, session })} title={t('pane.starterTitle')}>
+              <Button key={starter.key} kind="quiet" onClick={() => ask(ctx, starter.request, { send: false, session })} tip={t('pane.starterTitle')}>
                 {t(STARTER_LABELS[starter.key])}
-              </TextButton>
+              </Button>
             ))}
           </div>
         )}
       </Section>
-      <div style={{ ...S.row, padding: '10px 12px', gap: 8 }}>
-        <TextButton onClick={onOpenMap}>{t('pane.openMap')}</TextButton>
+      <div style={{ ...S.row, padding: 12, gap: 8 }}>
+        <Button onClick={onOpenMap}>{t('pane.openMap')}</Button>
       </div>
     </div>
   )

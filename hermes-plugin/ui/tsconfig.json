@@ -13,7 +13,8 @@
     "types": [],
     "baseUrl": ".",
     "paths": {
-      "@kumi/theme": ["src/desktop/theme.ts"]
+      "@kumi/theme": ["src/desktop/theme.ts"],
+      "@kumi/controls": ["src/desktop/controls.tsx"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "sdk.d.ts"]

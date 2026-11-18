@@ -277,13 +277,17 @@ test('FOCUS reads Kumi\'s own shape: Live\'s fields and the neutral ones, the pa
   }
 })
 
-test('FOCUS says Kumi stopped (not "not answering") once it stopped, and keeps the catch-up when the DAW reports no focus', async () => {
+test('the status line says Kumi stopped (not "not answering") once it stopped, FOCUS doesn\'t say it again, and FOCUS keeps the catch-up when the DAW reports no focus', async () => {
   const { FocusView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
+  const { chipWords } = await load('src/shared/format.ts')
+  assert.equal(chipWords({ stale: true, running: false, daw: 'ableton', project: { name: 'Set' } }).text, 'Live · Set · Kumi stopped')
   const stopped = renderToStaticMarkup(createElement(FocusView, { focus: { stale: true, running: false, focus: { track: { name: 'Drums' } } }, now: 0 }))
-  assert.ok(stopped.includes('Kumi stopped') && !stopped.includes('not answering'), stopped)
+  assert.ok(!stopped.includes('Kumi stopped') && !stopped.includes('not answering') && stopped.includes('opacity:0.6'), stopped)
   const closed = { project: { name: 'Night Drive' }, focus: null, catch_up: [{ set: 'Night Drive', lines: ['Bass muted'], more: 0 }] }
   const html = renderToStaticMarkup(createElement(FocusView, { focus: closed, now: 0 }))
   for (const text of ['Nothing selected', 'Night Drive', 'Since Kumi last looked', 'Bass muted']) assert.ok(html.includes(text), `${text} in ${html}`)
+  // While the status line names the project, FOCUS doesn't chip it again.
+  assert.ok(!renderToStaticMarkup(createElement(FocusView, { focus: { ...closed, catch_up: [] }, now: 0, project: false })).includes('Night Drive'))
   const reaper = { focus: { track: { name: 'Vox' }, mainView: { kind: 'timeline', label: 'Arrange' }, section: { kind: 'marker', name: 'Arrange' } }, transport: { playing: true, line: 12 } }
   const neutral = renderToStaticMarkup(createElement(FocusView, { focus: reaper, now: 0 }))
   assert.ok(!/>[^<]*\b12\b[^<]*</.test(neutral), 'the line a snapshot was written at is never shown')
@@ -478,17 +482,21 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
     ]
   }
   const html = renderToStaticMarkup(createElement(HistoryView, { history, now: 0, action: () => null }))
-  for (const text of ['Live stopped answering mid-change.', english('history.lookFirst'), 'Bass was changed by hand since, so Kumi kept it.', 'Bass · mixer · c3', 'Tempo 120 → 124']) {
+  for (const text of ['Live stopped answering mid-change.', english('history.lookFirst'), 'Bass was changed by hand since, so Kumi kept it.', 'Tempo 120 → 124']) {
     assert.ok(html.includes(text), `${text} in ${html}`)
   }
-  // An earlier runtime's applied row, while Kumi answers: it can't be undone because Kumi restarted since, and says
-  // where to undo it. A stale snapshot clears every row's undo, so there it says nothing of a restart.
-  const restarted = english('history.restartedSince', 'Live').replaceAll("'", '&#x27;')
+  // The meta line says what the title doesn't: "Bass muted" names its track, so the line is the kind of change, and
+  // never the machine label (c3).
+  assert.ok(html.includes('>mixer<') && !html.includes('c3'), html)
+  // An earlier runtime's applied row, while Kumi answers: it can't be undone because Kumi restarted since. That's said
+  // once, under a divider, for every such row; a stale snapshot clears every row's undo, so there it says nothing of it.
+  const restarted = english('history.restartedSinceAll', 'Live').replaceAll("'", '&#x27;')
   const live = renderToStaticMarkup(createElement(HistoryView, { history, now: 0, live: true, daw: 'ableton' }))
-  assert.ok(live.includes(restarted) && live.includes(english('history.expired').replaceAll("'", '&#x27;')), live)
-  assert.ok(!html.includes(restarted))
+  assert.ok(live.includes(restarted) && live.includes(english('history.beforeRestart')) && live.includes(english('history.expired').replaceAll("'", '&#x27;')), live)
+  assert.ok(!html.includes(restarted) && !html.includes(english('history.beforeRestart')))
   // A script's row has no undo from the start (Kumi never undoes one, CC-19): applied, saying so, never "restarted".
   assert.equal(live.split(restarted).length - 1, 1, live)
+  assert.ok(!live.includes(english('history.restartedSince', 'Live').replaceAll("'", '&#x27;')), 'no paragraph under each row')
   assert.ok(live.includes(english('history.scriptUndo', 'Live').replaceAll("'", '&#x27;')), live)
   assert.ok(live.includes(`aria-label="${english('history.applied')}"`), live)
 })
@@ -498,10 +506,10 @@ test('a Japanese window reads FOCUS and HISTORY in Japanese; the rows keep their
   const inJapanese = element => renderToStaticMarkup(createElement(I18n.Provider, { value: translator('ja') }, element))
   const history = { items: [{ id: 'h-1', label: 'c1', title: 'Drums volume −6.0 → −4.0 dB', family: 'mixer', state: 'undone', undo_available: false, at: 0, track: 'Drums' }] }
   const rows = inJapanese(createElement(HistoryView, { history, now: 0 }))
-  for (const text of ['aria-label="取り消し済み"', 'Drums volume −6.0 → −4.0 dB', 'Drums · mixer · c1 · たった今']) assert.ok(rows.includes(text), `${text} in ${rows}`)
+  for (const text of ['aria-label="取り消し済み"', 'Drums volume −6.0 → −4.0 dB', 'mixer · たった今']) assert.ok(rows.includes(text), `${text} in ${rows}`)
   assert.ok(inJapanese(createElement(HistoryView, { history: { items: [] } })).includes('まだ変更はありません'))
   const focus = inJapanese(createElement(FocusView, { focus: { stale: true, running: false, focus: { track: { name: 'Drums' } }, transport: { playing: false } }, now: 0 }))
-  for (const text of ['Drums', '■ 停止中', 'Kumi は停止中']) assert.ok(focus.includes(text), `${text} in ${focus}`)
+  for (const text of ['Drums', '■ 停止中']) assert.ok(focus.includes(text), `${text} in ${focus}`)
 })
 
 test("a track listen's capture note shows as plain text under the capture line, and nothing shows for an empty one", () => {

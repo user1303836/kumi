@@ -368,3 +368,9 @@ export function chipWords(status: Status | null, tempo?: unknown, t: Translate =
   if (!status.stale && status.setup?.daw_open === false) return { tone: 'muted', text: t('chip.dawClosed', daw) }
   return { tone: 'muted', text: t('chip.notConnected', daw) }
 }
+
+/** Whether `chipWords` names the project: then FOCUS needn't say it again (one home per fact). */
+export function statusNamesProject(status: Status | null): boolean {
+  if (!status || !clean(status.project?.name ?? '', 40)) return false
+  return Boolean(status.connected || (status.stale && (status.running === false || status.owner)))
+}

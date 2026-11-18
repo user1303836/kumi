@@ -5,7 +5,7 @@
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { addFolderRequest, beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, folderExample, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { addFolderRequest, beatSeconds, canUndoChange, chipWords, clean, cleanupWords, folderExample, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, statusNamesProject, undoRequest } from '../shared/format.ts'
 import { useFirstOpen } from '../shared/atlas/first.ts'
 import { sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
@@ -143,7 +143,8 @@ function Dashboard() {
     }
   }, [store, audition])
 
-  const words = chipWords(state.status, state.focus?.transport?.tempo, t)
+  // One home per fact, as in Desktop's pane: the tempo is FOCUS's; the project is the status line's while it names it.
+  const words = chipWords(state.status, undefined, t)
   const tone = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint }[words.tone]
   const connected = Boolean(state.status?.connected)
 
@@ -189,15 +190,14 @@ function Dashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(320px, 2fr)', gap: 12, alignItems: 'stretch' }}>
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', alignSelf: 'start' }}>
           <Section title={t('pane.focus')}>
-            <FocusView focus={state.focus} loading={state.focus === null && !state.failed.focus} now={now} />
+            <FocusView focus={state.focus} loading={state.focus === null && !state.failed.focus} now={now} project={!statusNamesProject(state.status)} />
           </Section>
           <Section title={t('pane.history')}>
             <HistoryView
-              action={item => {
-                // One Copy undo per change, on the row its undo starts from, as in Desktop's pane (CC-3 A2).
-                const rows = changesOf(state.history?.items ?? []).find(change => change.includes(item))
-                return rows && undoRowOf(rows) === item && canUndoChange(state.status, rows) ? <CopyButton label={t('dashboard.copyUndo')} text={undoRequest(item)} /> : null
-              }}
+              action={(head, rows) =>
+                // One Copy undo per change, on its head, as in Desktop's pane (CC-3 A2).
+                canUndoChange(state.status, rows) ? <CopyButton label={t('dashboard.copyUndo')} text={undoRequest(head)} /> : null
+              }
               daw={state.status?.daw}
               history={state.history}
               loading={state.history === null && !state.failed.history}

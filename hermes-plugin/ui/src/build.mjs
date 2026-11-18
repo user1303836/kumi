@@ -36,7 +36,7 @@ const bundles = [
       entryPoints: [join(root, 'src/desktop/plugin.tsx')],
       format: 'esm',
       external: ['@hermes/plugin-sdk', 'react', 'react/jsx-runtime'],
-      alias: { '@kumi/theme': join(root, 'src/desktop/theme.ts') }
+      alias: { '@kumi/theme': join(root, 'src/desktop/theme.ts'), '@kumi/controls': join(root, 'src/desktop/controls.tsx') }
     }
   },
   {
@@ -48,7 +48,8 @@ const bundles = [
       alias: {
         react: join(root, 'src/dashboard/react.ts'),
         'react/jsx-runtime': join(root, 'src/dashboard/jsx-runtime.ts'),
-        '@kumi/theme': join(root, 'src/dashboard/theme.ts')
+        '@kumi/theme': join(root, 'src/dashboard/theme.ts'),
+        '@kumi/controls': join(root, 'src/dashboard/controls.tsx')
       }
     }
   }

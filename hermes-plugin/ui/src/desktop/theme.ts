@@ -8,6 +8,8 @@ export const T = {
   muted: 'var(--ui-text-tertiary)',
   faint: 'var(--ui-text-quaternary)',
   border: 'var(--ui-stroke-secondary)',
+  // Hermes's in-panel divider (DESIGN.md: "flat, not boxed"): what separates rows and sections inside one surface.
+  hairline: 'var(--ui-stroke-tertiary)',
   card: 'var(--ui-bg-card)',
   // An opaque surface for what floats over other views (the Make panel over the map): the card colour is see-through.
   raised: 'var(--ui-bg-elevated)',
