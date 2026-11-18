@@ -439,11 +439,7 @@ async fn native_bridge_configuration_resolves_binary_and_sibling_metadata() {
     let binary = s.root.path().join("native/ableton-mcp-server");
     fs::create_dir_all(binary.parent().unwrap()).unwrap();
     fs::write(&binary, "native fixture").unwrap();
-    fs::write(
-        binary.parent().unwrap().join("package.json"),
-        json!({"version":kumi_types::version::KUMI_VERSION,"bridge":"1.0.11"}).to_string(),
-    )
-    .unwrap();
+    fs::write(binary.parent().unwrap().join("package.json"), json!({"version":kumi::KUMI_VERSION,"bridge":"1.0.11"}).to_string()).unwrap();
     fs::write(&s.config, json!({"version":2,"server":{"command":binary,"args":["--config",s.config]}}).to_string()).unwrap();
     let server = read_bridge_server(s.config.to_str().unwrap()).unwrap();
     assert!(server.native());
@@ -455,7 +451,7 @@ async fn native_bridge_configuration_resolves_binary_and_sibling_metadata() {
     // A native Kumi's version heads the Installation section; there's no Node to check.
     assert!(!doctor_checks(&io).await.unwrap().iter().any(|c| c.text.contains("native executable") || c.text.contains("Node")));
     let installation = installation_checks(&io.env, &io.installation).await;
-    assert!(installation[0].text.starts_with(&format!("Kumi {}", kumi_types::version::KUMI_VERSION)), "{installation:?}");
+    assert!(installation[0].text.starts_with(&format!("Kumi {}", kumi::KUMI_VERSION)), "{installation:?}");
 }
 fn put(path: &std::path::Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -481,13 +477,13 @@ async fn installation_names_this_kumi_what_it_goes_back_to_and_how_the_shell_fin
     let mut io = s.io();
     let home = s.root.path().join(".kumi");
     io.env.insert("KUMI_INSTALLED".into(), "1".into());
-    put(&home.join("app/package.json"), &json!({"version":kumi_types::version::KUMI_VERSION}).to_string());
+    put(&home.join("app/package.json"), &json!({"version":kumi::KUMI_VERSION}).to_string());
     let checks = installation_checks(&io.env, &io.installation).await;
-    assert!(checks[0].text.starts_with(&format!("Kumi {} in ", kumi_types::version::KUMI_VERSION)), "{checks:?}");
+    assert!(checks[0].text.starts_with(&format!("Kumi {} in ", kumi::KUMI_VERSION)), "{checks:?}");
     assert_eq!(find(&checks, "Nothing kept to go back to yet").status, CheckStatus::Ok);
     put(&home.join("app.previous/package.json"), &json!({"version":"1.15.0"}).to_string());
     assert!(find(&installation_checks(&io.env, &io.installation).await, "update --rollback goes back to 1.15.0").next.is_none());
-    put(&home.join("app.previous/package.json"), &json!({"version":kumi_types::version::KUMI_VERSION}).to_string());
+    put(&home.join("app.previous/package.json"), &json!({"version":kumi::KUMI_VERSION}).to_string());
     find(&installation_checks(&io.env, &io.installation).await, "has only this same");
     // The shell finds Kumi's launcher, or another kumi before it, or none in this window.
     let ours = home.join("bin");
@@ -522,13 +518,13 @@ async fn installation_says_whether_a_newer_kumi_is_out_from_the_daily_check_with
     let cache = s.root.path().join("update-check.json");
     let at = now_ms() as f64 - 3. * 3_600_000.;
     // Versions compare as numbers, from this one: x.y.(z + 10) is newer, and 1.9.0 is older than any 1.10 or later.
-    let this: Vec<u32> = kumi_types::version::KUMI_VERSION.split(['.', '-']).take(3).map(|part| part.parse().unwrap()).collect();
+    let this: Vec<u32> = kumi::KUMI_VERSION.split(['.', '-']).take(3).map(|part| part.parse().unwrap()).collect();
     let later = format!("{}.{}.{}", this[0], this[1], this[2] + 10);
-    for (latest, newer) in [("99.0.0", true), (later.as_str(), true), ("1.9.0", false), (kumi_types::version::KUMI_VERSION, false)] {
+    for (latest, newer) in [("99.0.0", true), (later.as_str(), true), ("1.9.0", false), (kumi::KUMI_VERSION, false)] {
         fs::write(&cache, json!({"checkedAt":at,"latest":latest}).to_string()).unwrap();
         let said = check(io.clone()).await;
         if newer {
-            assert_eq!(said.text, format!("Kumi {latest} is out (this is {})", kumi_types::version::KUMI_VERSION));
+            assert_eq!(said.text, format!("Kumi {latest} is out (this is {})", kumi::KUMI_VERSION));
             assert_eq!((said.status, said.next.unwrap()), (CheckStatus::Note, format!("{} update", *KUMI)));
         } else {
             assert_eq!(said, Check::ok("Up to date when Kumi last looked (3 hours ago)"), "{latest}");
@@ -653,7 +649,7 @@ async fn doctor_json_takes_out_keys_and_counts_only_fixes() {
     let printed = out.0.borrow().clone();
     assert!(!printed.contains("sk-fixture-never-printed") && printed.contains("Read [secret] in a log"), "{printed}");
     let value: serde_json::Value = serde_json::from_str(&printed).unwrap();
-    assert_eq!(value["kumi"], kumi_types::version::KUMI_VERSION);
+    assert_eq!(value["kumi"], kumi::KUMI_VERSION);
     assert_eq!(value["fixes"], 0);
     let titles: Vec<_> = value["sections"].as_array().unwrap().iter().map(|s| s["title"].as_str().unwrap().to_string()).collect();
     assert_eq!(titles, ["Installation", "Sign-in, Live and the rest"]);

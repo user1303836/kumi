@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 
 use crate::types::{CallOptions, Reasoning, StreamPart, StreamParts};
 use kumi_types::contracts::Usage;
-use kumi_types::version::KUMI_VERSION;
+use kumi_types::version::kumi;
 
 const MAX_BYTES: u64 = 512 * 1024;
 const KEEP_LINES: usize = 1000;
@@ -291,7 +291,7 @@ impl Turn {
 pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Usage>) -> Value {
     let mut line = json!({
         "at": iso_string(now_ms()),
-        "kumi": KUMI_VERSION,
+        "kumi": kumi(),
         "ms": elapsed_ms,
         "stop": stop,
         "modelCalls": timing.model_calls,

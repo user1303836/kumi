@@ -355,7 +355,7 @@ pub struct ProgramOptions {
 
 // GitHub's API answers 403 to a request without a User-Agent (Node's fetch sent "node").
 static CLIENT: LazyLock<reqwest::Client> =
-    LazyLock::new(|| kumi_net::client().user_agent(format!("kumi/{}", kumi_types::version::KUMI_VERSION)).build().expect("an HTTP client"));
+    LazyLock::new(|| kumi_net::client().user_agent(format!("kumi/{}", kumi_types::version::kumi())).build().expect("an HTTP client"));
 
 fn last_segment(url: &str) -> &str {
     url.rsplit('/').next().unwrap_or(url)
@@ -1394,7 +1394,7 @@ mod user_agent_tests {
         });
         super::CLIENT.get(&url).send().await.unwrap();
         let request = server.await.unwrap();
-        assert!(request.contains(&format!("user-agent: kumi/{}\r\n", kumi_types::version::KUMI_VERSION)), "{request}");
+        assert!(request.contains(&format!("user-agent: kumi/{}\r\n", kumi_types::version::kumi())), "{request}");
     }
 }
 

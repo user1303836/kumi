@@ -1,6 +1,7 @@
 //! Original installed-update scenarios, using native bundle layout and executable startup probes.
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi::KUMI_VERSION;
 use kumi::{config::json_files, install::*, tui::tty::TtyOutput};
 use kumi_agent::core::{
     contracts::{MemoryScope, MemoryStore},
@@ -15,10 +16,7 @@ use kumi_daw::process::{executable_name, run_program, Ran};
 use kumi_daw::provider::newer as newer_version;
 use kumi_daw_ableton::app::answers::{BridgeAfterUpdate, LiveRunning};
 use kumi_daw_ableton::app::install::{finish_legacy_transition, only_the_host_differs};
-use kumi_types::{
-    system::{self, Env, SystemProgram},
-    version::KUMI_VERSION,
-};
+use kumi_types::system::{self, Env, SystemProgram};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{

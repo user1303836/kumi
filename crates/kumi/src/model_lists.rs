@@ -6,11 +6,12 @@
 //! secret itself), by the Kumi version that kept it, and for at most [`MOST_AGE_MS`]. Model servers' lists aren't kept:
 //! they're on this computer and answer at once. The file is a cache: one that can't be read or written is as if empty,
 //! and an older Kumi never reads it.
+use crate::KUMI_VERSION;
 use kumi_ai::{
     auth::store::Credential,
     providers::{api_key_from, models::ModelInfo, ProviderId, SignIn},
 };
-use kumi_types::{system::Env, version::KUMI_VERSION};
+use kumi_types::system::Env;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{

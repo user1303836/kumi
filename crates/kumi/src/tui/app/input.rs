@@ -823,7 +823,7 @@ impl TuiApp {
             Effect::Changelog => {
                 self.clear_editor();
                 let since = self.0.state.borrow().news_since.clone();
-                match crate::whats_new::changelog(kumi_types::version::KUMI_VERSION, since.as_deref()) {
+                match crate::whats_new::changelog(crate::KUMI_VERSION, since.as_deref()) {
                     Some(news) => {
                         let footer = Some(format!("Every release: {}", crate::whats_new::history_link()));
                         self.0.state.borrow_mut().transcript.add(Entry::News { title: news.title, items: news.items, footer });

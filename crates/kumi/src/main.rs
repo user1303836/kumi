@@ -2,6 +2,8 @@
 //! another agent's host starts, and `kumi design`, one headless sound-design render: they branch off here, before the
 //! app reads its settings, keys or sign-in.
 fn main() {
+    // Kumi's release for the crates below (user agents, the bridges' handshake), before any of them is asked.
+    kumi_types::version::set(kumi::KUMI_VERSION);
     let mut args = std::env::args_os().skip(1);
     let first = args.next();
     let serve = first.as_deref() == Some(std::ffi::OsStr::new("serve"));

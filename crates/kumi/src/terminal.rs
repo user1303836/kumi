@@ -828,7 +828,7 @@ impl PlainTerminal {
             }
             Effect::Changelog => {
                 let since = self.0.options.whats_new.as_ref().and_then(|news| news.since.clone());
-                match crate::whats_new::changelog(kumi_types::version::KUMI_VERSION, since.as_deref()) {
+                match crate::whats_new::changelog(crate::KUMI_VERSION, since.as_deref()) {
                     Some(news) => self.news(&news, Some(format!("Every release: {}", crate::whats_new::history_link()))),
                     None => self.notice("[new] Kumi's changelog has no notes for this version."),
                 }

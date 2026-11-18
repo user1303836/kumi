@@ -105,7 +105,7 @@ impl Sources {
         // Kumi's own sources are https: nothing is followed off it to plain http (stand-in servers in tests are http).
         let secure = [musicbrainz, listenbrainz, spotify].iter().all(|base| base.starts_with("https://"));
         let client = kumi_net::client()
-            .user_agent(format!("Kumi/{} ( https://github.com/user1303836/kumi )", kumi_types::version::KUMI_VERSION))
+            .user_agent(format!("Kumi/{} ( https://github.com/user1303836/kumi )", kumi_types::version::kumi()))
             .timeout(Duration::from_secs(20))
             .https_only(secure)
             .build()

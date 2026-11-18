@@ -58,7 +58,7 @@ fn yes() -> kumi_daw::provider::BridgeCommand {
 async fn update_said(env: &Env) -> String {
     let out = Rc::new(Out::default());
     let mut io = kumi::install::InstalledIo::new(out.clone(), env.clone());
-    io.version = Some(kumi_types::version::KUMI_VERSION.into());
+    io.version = Some(kumi::KUMI_VERSION.into());
     assert_eq!(kumi::install::update_installed(io).await.unwrap(), 0, "{}", out.0.borrow());
     let said = out.0.borrow().clone();
     said

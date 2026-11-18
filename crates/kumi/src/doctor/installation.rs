@@ -2,6 +2,7 @@
 //! the shell finds `kumi`, whether a newer Kumi is out, free space, and what Live needs from this computer.
 //! Files and the system are read; nothing goes over the network: whether a newer Kumi is out comes from
 //! the daily check's note, and the bridge's ports are tried on this computer (127.0.0.1) only.
+use crate::KUMI_VERSION;
 use crate::{
     config::{kumi_dir, load_settings_file, read_settings},
     install::{app_version, chown_line, has_app, not_yours, startup_files, PATH_MARKER, UPDATE_SPACE},
@@ -19,7 +20,6 @@ use kumi_types::{
     command::KUMI,
     disk::{free_bytes, size},
     system::{self, Env},
-    version::KUMI_VERSION,
 };
 use serde_json::Value;
 use std::{path::Path, rc::Rc};

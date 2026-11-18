@@ -1,4 +1,5 @@
 //! `kumi update` for a checkout: pulls, rebuilds and launches native binaries.
+use crate::KUMI_VERSION;
 use crate::{
     process::TerminalAsk,
     spinner::{step, Terminal},
@@ -23,7 +24,6 @@ use kumi_types::{
     command::{KUMI, KUMI_REPAIR},
     errors::RuntimeError,
     system::Env,
-    version::KUMI_VERSION,
 };
 use serde_json::{json, Value};
 use std::{fs, path::Path, rc::Rc};

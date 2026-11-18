@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::rc::Rc;
 
+use crate::KUMI_VERSION;
 use chrono::{FixedOffset, Local, Offset};
 use futures::future::{FutureExt, LocalBoxFuture};
 use kumi_agent::core::contracts::{ConversationMatch, ConversationStore, ConversationSummary, ConversationToExport};
@@ -18,10 +19,10 @@ use kumi_agent::gone_words;
 use kumi_common::js::string::head;
 use kumi_common::time::now_ms;
 use kumi_types::contracts::{ChangePicture, ChangeRecord, ColorChange, DevicePlacement};
+use kumi_types::errors::RuntimeError;
 use kumi_types::picture::{PictureTrack, TrackMark};
 use kumi_types::place::IMPORTED;
 use kumi_types::system::{self, Env};
-use kumi_types::{errors::RuntimeError, version::KUMI_VERSION};
 
 use crate::config::{load_projects_dir, load_settings_file, read_settings};
 use crate::report::{known_secrets, redactor, username};
