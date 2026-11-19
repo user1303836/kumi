@@ -8,14 +8,16 @@ Kumi は [Hermes Agent](https://hermes-agent.nousresearch.com) のプラグイ�
 
 ## インストール
 
+Hermes Desktop では、**スキルとツール → プラグイン** で Kumi のカードからインストールできます。ターミナルでは次のとおりです。
+
 ```sh
 hermes plugins install kumi
 hermes plugins enable kumi
 ```
 
-`kumi` は Hermes のプラグインカタログでの Kumi の名前です。Hermes v0.22.7 と v0.23.0 では、カタログがこれらのバージョンで読める大きさを超えたため、`hermes plugins install kumi` は Kumi がカタログにないと答えます。Hermes を v0.23.1 以降に更新するか、Kumi のリポジトリから `hermes plugins install user1303836/kumi#hermes-plugin` でインストールして同じように有効にしてください。リポジトリからインストールした Kumi は、カタログではなくリポジトリから更新されます。
+`kumi` は Hermes のプラグインカタログでの Kumi の名前です。Hermes v0.22.7 と v0.23.0 では、カタログがこれらのバージョンで読める大きさを超えたため、どちらの方法でも「'kumi' is not in the Hermes plugin catalog」と表示されて止まります。Hermes を v0.23.1 以降に更新するか、Kumi のリポジトリから `hermes plugins install user1303836/kumi#hermes-plugin` でインストールして同じように有効にしてください。リポジトリからインストールした Kumi は、カタログではなくリポジトリから更新されます。
 
-Hermes Desktop では、**スキルとツール → プラグイン** で Kumi の **Desktop** スイッチもオンにしてください。プラグインの Desktop スイッチは最初はオフになっています。
+カードからインストールすると（Hermes v0.23.1 以降）、Kumi はすぐにオンになり、ペインも表示されます。ターミナルでインストールした場合は、**スキルとツール → プラグイン** の Kumi の **Desktop** スイッチが最初はオフです。オンにすると Kumi のペインとサウンドマップが表示されます。
 
 ## セットアップ
 

@@ -12,18 +12,20 @@ use the other.
 
 ## Install
 
+In Hermes Desktop, find Kumi under **Capabilities → Plugins** and install it from its card. In a terminal:
+
 ```sh
 hermes plugins install kumi
 hermes plugins enable kumi
 ```
 
-`kumi` is Kumi's name in Hermes's plugin catalog. On Hermes v0.22.7 and v0.23.0, `hermes plugins install kumi` says
-Kumi isn't in the catalog (the catalog has outgrown what those versions read): update Hermes to v0.23.1 or later, or
+`kumi` is Kumi's name in Hermes's plugin catalog. On Hermes v0.22.7 and v0.23.0, both ways stop at "'kumi' is not in
+the Hermes plugin catalog" (the catalog has outgrown what those versions read): update Hermes to v0.23.1 or later, or
 install Kumi from its repository with `hermes plugins install user1303836/kumi#hermes-plugin` and enable it the same
 way. An install from the repository updates from the repository, not from the catalog.
 
-In Hermes Desktop, also turn on Kumi's **Desktop** switch under **Capabilities → Plugins**: a plugin's Desktop switch
-starts off.
+Installed from its card (Hermes v0.23.1 or later), Kumi is on at once, its pane included. Installed in a terminal, its
+**Desktop** switch under **Capabilities → Plugins** starts off: turn it on for Kumi's pane and sound map.
 
 ## Set up
 
