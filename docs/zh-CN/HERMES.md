@@ -8,14 +8,16 @@ Kumi 也是 [Hermes Agent](https://hermes-agent.nousresearch.com) 的插件。�
 
 ## 安装
 
+在 Hermes Desktop 中，可以在 **技能与工具 → 插件** 里从 Kumi 的卡片安装。在终端中：
+
 ```sh
 hermes plugins install kumi
 hermes plugins enable kumi
 ```
 
-`kumi` 是 Kumi 在 Hermes 插件目录中的名称。在 Hermes v0.22.7 和 v0.23.0 上，目录已超出这些版本能读取的大小，`hermes plugins install kumi` 会说目录里没有 Kumi：请把 Hermes 更新到 v0.23.1 或更高版本，或者从 Kumi 的代码仓库安装 `hermes plugins install user1303836/kumi#hermes-plugin`，然后同样启用它。从代码仓库安装的 Kumi 会从代码仓库更新，而不是从目录更新。
+`kumi` 是 Kumi 在 Hermes 插件目录中的名称。在 Hermes v0.22.7 和 v0.23.0 上，目录已超出这些版本能读取的大小，两种方式都会停在“'kumi' is not in the Hermes plugin catalog”：请把 Hermes 更新到 v0.23.1 或更高版本，或者从 Kumi 的代码仓库安装 `hermes plugins install user1303836/kumi#hermes-plugin`，然后同样启用它。从代码仓库安装的 Kumi 会从代码仓库更新，而不是从目录更新。
 
-在 Hermes Desktop 中，还要在 **技能与工具 → 插件** 里打开 Kumi 的**桌面**开关：插件的桌面开关默认是关闭的。
+从卡片安装时（Hermes v0.23.1 或更高版本），Kumi 会立即开启，面板也会出现。在终端中安装时，**技能与工具 → 插件** 里 Kumi 的**桌面**开关默认是关闭的：打开它才能看到 Kumi 的面板和声音地图。
 
 ## 设置
 
