@@ -613,6 +613,12 @@ impl KernelTool for LibraryTool {
     fn deferred(&self) -> bool {
         self.name != FIND_SOUNDS_TOOL
     }
+    /// The presets' and the Sets' searches only read what Kumi has learned. The sounds' search doesn't only read: a
+    /// clip it's to find sounds like is asked of the DAW (REAPER and Renoise may render it or write its audio to a
+    /// file, and a render stops playback), and a folder it's given that Kumi hasn't learned is kept and learned.
+    fn only_reads(&self) -> bool {
+        self.name != FIND_SOUNDS_TOOL
+    }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         match self.name {
             FIND_SOUNDS_TOOL => self.find_sounds(input, signal).await,

@@ -306,7 +306,7 @@ impl<H: ChangeHost> History<H> {
     /// followed it are retired, as after a restructure Kumi can't read exactly, and what the turns showed with them.
     fn unknown_shift(&self) {
         let mut book = self.host.book().borrow_mut();
-        book.refs.clear();
+        book.drop_refs();
         book.known.clear();
         book.cursors.clear();
         book.clear_names();

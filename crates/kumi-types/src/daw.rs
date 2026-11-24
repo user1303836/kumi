@@ -94,8 +94,9 @@ pub struct PromptVocab {
     pub write_notes_tool: &'static str,
     /// The DAW's own EQ, by name: "EQ Eight".
     pub eq: &'static str,
-    /// How one of its reads answers, for a script that calls them (read_with_code): where a list's rows are, and its
-    /// next page's cursor. Nothing else tells a script's author before a first result.
+    /// How one of its reads answers, for a script that calls them (read_with_code): where a list's rows are, its next
+    /// page's cursor (none on the last page: a loop that waits for a null one never ends), and what a failed read
+    /// does to the script. Nothing else tells a script's author before a first result.
     pub read_answer: &'static str,
     /// The octave the DAW names middle C (MIDI 60) in: Live calls it C3.
     pub middle_c_octave: i8,
@@ -840,7 +841,7 @@ impl DawProfile {
             listen_method: crate::live_word!(listen_method),
             write_notes_tool: crate::live_word!(write_notes_tool),
             eq: crate::live_word!(eq),
-            read_answer: "each live_ read answers {live: {…}, observation: {…}}: a list's rows are live.items, and live.nextCursor is its next page's cursor while there is one",
+            read_answer: "each live_ read answers {live: {…}, observation: {…}}: a list's rows are live.items, and live.nextCursor is its next page's cursor (the last page has none). A read Live refuses ends the script, since Live then drops the refs read so far: leave out what a read can't take (a MIDI clip has no warp markers) rather than catch its failure",
             middle_c_octave: 3,
             tracker_notes: false,
             structure_moves: STRUCTURE_MOVES,
@@ -942,7 +943,7 @@ impl DawProfile {
             listen_method: "Kumi renders the part offline to hear it (from_beat and beats, or the loop or the playhead's part), then plays it out loud for you; a render stops REAPER's playback. While REAPER plays, a listen with no from_beat hears the master output as it plays (seconds, 8 by default) and stops nothing.",
             write_notes_tool: "the tool that writes MIDI notes",
             eq: "ReaEQ",
-            read_answer: "a list read answers {items: […], nextCursor}: nextCursor is its next page's cursor, when there is one",
+            read_answer: "a list read answers {items: […], nextCursor}: nextCursor is its next page's cursor, and the last page has none",
             middle_c_octave: 4,
             tracker_notes: false,
             structure_moves: UNKNOWN_STRUCTURE_MOVES,
@@ -1045,7 +1046,7 @@ impl DawProfile {
             listen_method: "Kumi renders the part offline to hear it (from_beat and beats, or the loop or the playhead's part), then plays it out loud for you; a render stops Renoise's playback. Renoise's scripts can't hear what it plays, so while it plays a listen needs from_beat and beats.",
             write_notes_tool: "the tool that writes pattern lines",
             eq: "EQ 10",
-            read_answer: "a list read answers {items: […], nextCursor}: nextCursor is its next page's cursor, when there is one",
+            read_answer: "a list read answers {items: […], nextCursor}: nextCursor is its next page's cursor, and the last page has none",
             middle_c_octave: 5,
             tracker_notes: true,
             structure_moves: UNKNOWN_STRUCTURE_MOVES,
@@ -1120,7 +1121,7 @@ impl DawProfile {
             listen_method: "Kumi doesn't listen in SoundCraft yet.",
             write_notes_tool: "the tool that writes notes",
             eq: "EQ 7-Band",
-            read_answer: "a list read answers {items: […], nextCursor}: nextCursor is its next page's cursor, when there is one",
+            read_answer: "a list read answers {items: […], nextCursor}: nextCursor is its next page's cursor, and the last page has none",
             middle_c_octave: 3,
             tracker_notes: false,
             structure_moves: UNKNOWN_STRUCTURE_MOVES,

@@ -504,9 +504,13 @@ impl KernelTool for LiveTool {
             Reach::DawWrite
         }
     }
-    /// Live's reads (its notes, and the reads its bridge offers a model), and what Kumi's own tools here only read.
+    /// Live's reads: its notes, and the reads its bridge offers a model.
     fn only_reads(&self) -> bool {
-        self.reach() == Reach::DawRead || self.concurrent()
+        self.reach() == Reach::DawRead
+    }
+    /// A read that Live refuses, one too large, or a change to the Set drops the refs and cursors the turn has read.
+    fn dropped(&self) -> u64 {
+        self.owner.connection.references.borrow().drops
     }
     fn description(&self) -> &str {
         &self.description

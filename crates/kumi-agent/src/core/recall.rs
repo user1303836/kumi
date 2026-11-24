@@ -244,6 +244,10 @@ impl KernelTool for Recall {
     fn deferred(&self) -> bool {
         true
     }
+    /// It reads Kumi's own records (conversations, techniques, recipes) and nothing else.
+    fn only_reads(&self) -> bool {
+        true
+    }
     fn input_schema(&self) -> JsonObject {
         let schema = json!({"type":"object", "additionalProperties":false, "required":["query"], "properties":{
             "query":{"type":"string", "minLength":1, "maxLength":200, "description":"The telling words, such as \"vocal reverb chain\""},

@@ -195,6 +195,8 @@ pub trait RefScheme: Default {
 pub struct Book<S: RefScheme> {
     pub refs: IndexMap<String, String>,
     pub cursors: IndexMap<String, String>,
+    /// How often the refs were dropped whole (`drop_refs`): what read them before can't name them any more.
+    pub drops: u64,
     pub known: IndexMap<String, KnownTrack>,
     /// Parameters as discovery last read them, by ref: a picture of one's automation is drawn to its range.
     pub parameters: IndexMap<String, KnownParameter>,
@@ -332,8 +334,14 @@ impl<S: RefScheme> Book<S> {
         let scheme = &self.scheme;
         self.moved.retain(|reference| !places.iter().any(|place| *place == scheme.place_of(reference)));
     }
-    pub fn invalidate(&mut self) {
+    /// Drops every ref the turn's reads returned, and counts it: a script of reads that holds some is stopped
+    /// (`KernelTool::dropped`).
+    pub fn drop_refs(&mut self) {
         self.refs.clear();
+        self.drops += 1;
+    }
+    pub fn invalidate(&mut self) {
+        self.drop_refs();
         self.cursors.clear();
         self.known.clear();
         self.parameters.clear();

@@ -574,14 +574,31 @@ local_test!(a_script_naming_a_track_as_the_model_read_it_reaches_live_with_the_t
 
 // A read script's calls are Live's own reads (read_with_code): the session offers the tool with Live's reads as its
 // functions, a call in the script reaches Live as the model's own would, and only what the script returns goes back.
+// A read that fails in Live drops the refs the turn has read, the script's own among them: a script that skips the
+// failure ends there and says so, where it would otherwise answer with what it had as if that were all.
 local_test!(a_read_script_reads_live_through_the_models_read_tools_and_only_its_answer_goes_back, {
     let code = "const tracks = live_discover({kind: \"track\"}).live.items;\n\
                 return tracks.filter(track => track.mediaKind === \"midi\").map(track => track.ref);";
-    let script: Script = Rc::new(move |n| if n == 1 { call("read_with_code", json!({"code": code})) } else { answer("Done.") });
+    // (The fixture's Live has no answer for its Browser's roots: that read fails.)
+    let skipping = "const tracks = live_discover({kind: \"track\"}).live.items;\n\
+                    const roots = [];\n\
+                    for (const track of tracks) { try { roots.push(live_browser_roots({})); } catch (error) {} }\n\
+                    return {tracks: tracks.length, roots: roots.length};";
+    let script: Script = Rc::new(move |n| match n {
+        1 => call("read_with_code", json!({"code": code})),
+        2 => call("read_with_code", json!({"code": skipping})),
+        _ => answer("Done."),
+    });
     let run = run(FULL, script).await;
     let requests = run.main.requests.borrow();
     let sent = serde_json::to_value(&requests[1].messages).unwrap();
     let result = &sent.as_array().unwrap().last().unwrap()["content"][0];
     assert_eq!(result["toolName"], "read_with_code", "{sent}");
     assert_eq!(result["output"], json!({"type": "text", "value": "{\"result\":[\"track:1\",\"track:3\"],\"calls\":1}"}), "{sent}");
+    let sent = serde_json::to_value(&requests[2].messages).unwrap();
+    let result = &sent.as_array().unwrap().last().unwrap()["content"][0];
+    let said = result["output"]["value"].as_str().unwrap_or_default();
+    assert!(said.contains("live_browser_roots: ") && said.contains("drops the refs"), "{sent}");
+    let asked = CALLED.with(|called| called.borrow().iter().filter(|(name, _)| name == "live_browser_roots").count());
+    assert_eq!(asked, 1, "the script read on after Live dropped its refs");
 });

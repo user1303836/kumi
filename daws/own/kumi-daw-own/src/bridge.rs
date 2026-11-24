@@ -1079,7 +1079,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 *self.epoch.borrow_mut() = Some(epoch.to_owned());
                 return;
             }
-            book.refs.clear();
+            book.drop_refs();
             book.known.clear();
             book.cursors.clear();
             book.clear_names();
@@ -2264,7 +2264,7 @@ pub fn follow_epoch<S: RefScheme>(book: &RefCell<Book<S>>, epoch: &RefCell<Optio
     }
     if epoch.borrow().is_some() {
         let mut book = book.borrow_mut();
-        book.refs.clear();
+        book.drop_refs();
         book.known.clear();
         book.cursors.clear();
         book.clear_names();
