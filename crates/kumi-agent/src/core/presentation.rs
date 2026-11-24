@@ -58,6 +58,7 @@ fn own(profile: &DawProfile, tool: &str) -> Option<(String, Option<String>, Opti
         "search_web" => said("searched the web", Some("searching the web"), Some(Search)),
         "read_web" => said("read a page", Some("reading a page"), Some(Read)),
         "search_conversations" => said("looked through earlier conversations", Some("looking through earlier conversations"), Some(Search)),
+        "read_with_code" => said("read with a script", Some("reading with a script"), Some(Code)),
         _ => None,
     }
 }

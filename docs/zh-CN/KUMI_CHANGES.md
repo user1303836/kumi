@@ -116,6 +116,7 @@ Kumi 会在你要求时播放，或在有助于检查、展示它所搭建的内
 | `render` | 不经播放，把音频轨道自身的片段渲染为文件，取其设备之前的信号（需要扩展） |
 | `make_device` | 制作 Max for Live 设备，或从已有设备做出新设备，从不写入原设备（[指南](KUMI_GUIDE.md#制作-max-for-live-设备)） |
 | `watch_me` | 记下工程的状态，然后看出你手动改了什么，用于制作配方 |
+| `read_with_code` | 在 Kumi 内运行脚本，把读取工具当作函数调用，只留下回答需要的内容，用于涉及许多轨道、设备或片段的问题；不做任何更改，在 REAPER 和 Renoise 中同样可用 |
 | `run_python` | 在 Live 中运行 Python，处理其他工具覆盖不到的事；在 Live 的撤销中算一步，没有 HISTORY 行 |
 | `undo_in_live` | Live 自己的撤销或重做，执行一次 |
 

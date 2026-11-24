@@ -2597,6 +2597,9 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
     fn reach(&self) -> Reach {
         Reach::DawRead
     }
+    fn only_reads(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

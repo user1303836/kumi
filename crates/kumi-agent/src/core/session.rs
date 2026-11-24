@@ -1801,6 +1801,8 @@ impl Session {
                 tools.push(taste.tool());
             }
             tools.extend(self.job_tools());
+            // One script in place of many reads, over the tools above that only read.
+            tools.extend(crate::kernel::code::tool(self.0.options.profile.words.app, &tools));
             let value = (self.0.options.kernel_factory)(KernelOptions {
                 instructions,
                 tools,
@@ -1870,6 +1872,11 @@ impl Session {
                 .unwrap_or_default(),
             habits,
             crate::core::plugin_tools::GUIDANCE.into(),
+            if crate::kernel::code::offered(&observation.tools) {
+                crate::kernel::code::guidance(&self.0.options.profile)
+            } else {
+                String::new()
+            },
             crate::core::audio_tools::guidance(self.0.options.audio.as_deref()).await.into(),
             music,
             // A DAW Kumi only reads gets nothing about making changes (its recipe and technique tools aren't made): its

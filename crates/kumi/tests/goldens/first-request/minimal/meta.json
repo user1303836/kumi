@@ -1,7 +1,7 @@
 {
-  "toolsKey": "NqjhI6PZYky11SDew_mMbf",
-  "fixed": 52109,
-  "fixedByHand": 52109,
+  "toolsKey": "y4AZNT2EyQAvMxs1NZnWUQ",
+  "fixed": 53778,
+  "fixedByHand": 53778,
   "sent": [
     "live_discover",
     "live_browser_search",
@@ -25,6 +25,7 @@
     "undo_change",
     "audition",
     "run_python",
+    "read_with_code",
     "find_tools",
     "call_tool"
   ],

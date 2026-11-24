@@ -504,6 +504,10 @@ impl KernelTool for LiveTool {
             Reach::DawWrite
         }
     }
+    /// Live's reads (its notes, and the reads its bridge offers a model), and what Kumi's own tools here only read.
+    fn only_reads(&self) -> bool {
+        self.reach() == Reach::DawRead || self.concurrent()
+    }
     fn description(&self) -> &str {
         &self.description
     }

@@ -42,7 +42,7 @@ indexmap.workspace = true
 percent-encoding.workspace = true
 regex.workspace = true
 # Max for Live device code, run in a sandbox.
-rquickjs = { version = "0.9", features = ["bindgen", "classes", "properties"] }
+rquickjs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

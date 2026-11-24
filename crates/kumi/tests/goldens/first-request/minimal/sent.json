@@ -730,6 +730,26 @@
   },
   {
     "type": "function",
+    "name": "read_with_code",
+    "description": "Reads a lot and keeps only what you need: runs JavaScript in Kumi (not in Live) where each read tool below is a function. A function takes its tool's input and returns its result (an object when that's JSON), and throws the tool's error; calls are plain, with no await. Use it when an answer takes more than a few reads, or far less than the reads return: loop over tracks or over a list's pages (follow a cursor to its end), filter, count and compare in the script, and `return` only the answer, as small as will do (the few rows, their refs, a count). Refs it returns are current. print() adds a line to the result. It changes nothing. E.g. `const found = []; for (const ref of refs) { const rows = live_discover({…}); … } return found;`. Functions: server_status, live_status, live_discover, live_browser_search, live_note_read, live_song_state, live_performance_read, live_key_estimate, live_take_lane_read, live_warp_marker_read, live_arrangement_automation_read, live_browser_roots, live_browser_inspect, live_device_read, live_automation_read, live_clip_time_convert, find_sounds, read_notes.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32768,
+          "description": "The script, as a function's body: call the read functions, then return the answer"
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
     "name": "find_tools",
     "description": "Your other tools, sent only when you need one. Each is listed as name(its fields; `?`: may be left out): what it's for. When a tool's fields are plain, run it straight away with call_tool, or by its name; otherwise ask by names (or a few words) and find_tools gives its whole description and input. They are: server_status(): Read current Live state; live_status(): Read current Live state; live_note_read(): Read current Live state; live_performance_read(): Read current Live state; live_key_estimate(): Read current Live state; live_take_lane_read(): Read current Live state; live_warp_marker_read(): Read current Live state; live_arrangement_automation_read(): Read current Live state; live_browser_roots(): Read current Live state; live_browser_inspect(): Read current Live state; live_device_read(): Read current Live state; live_automation_read(): Read current Live state; live_clip_time_convert(): Read current Live state; arrange(sections?, scene?, loop?, start_bar?, final?): Lay out an arrangement in the Arrangement from the producer's own clips, in one call; watch_me(action): Learn a routine the producer does by hand in Live; judge(goal?, track?, from_beat?, beats?, change?, done?): Work toward a sound goal in rounds, as an engineer would; tune(device, how, target?, knobs?, change?): Code picks the numbers for a change you chose, against the judged run's checklist, and…; groove(clip?, reference?, reference_tempo?, audio?, change?, apply?, amount?, done?): Shape a part's feel toward a reference's, judged on the notes with no listening; form(from_beat?, beats?, reference?): Lay out the song's form, heard; sound(tracks, against?, key?, from_beat?, beats?): Measure sounds in Live; render(track, from_beat, beats): Render an audio track's own clips; undo_in_live(redo?): Live's own undo; live_command(command?, track?, tracks?, clip?, stems?, quality?, merge?, path?, …): Use Live's own commands, through its menus and keys, for what your other tools can't do; plugin(action, device?, wavetable?, file?, name?): For preset creation and settings beyond configured knobs, use Kumi's shared vst3…; variations(action, set?, source?, anchors?, place?, count?, takes?, names?, …): Variations in Live; vst3(action, plugin?, role?, query?, folders?, refresh?, input?, output?, …): Built-in VST3 discovery, preset creation and editing. Besides these, every step make_changes lists is one too.",
     "inputSchema": {

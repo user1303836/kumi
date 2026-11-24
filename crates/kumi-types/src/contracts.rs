@@ -180,6 +180,17 @@ pub trait KernelTool {
     fn concurrent(&self) -> bool {
         CONCURRENT.contains(&self.name())
     }
+    /// Whether all it does is read (the DAW, this computer, Kumi's own records) and it leaves nothing behind: a script
+    /// of reads may call it. By default what `concurrent` says, for Kumi's own tools away from the DAW; a DAW's
+    /// integration says so of its readers. `reach` doesn't say it: a tool that reads the DAW may still write a file.
+    fn only_reads(&self) -> bool {
+        self.concurrent()
+    }
+    /// The tool this one stands in front of, when all it adds is for a call of the answer's own (ctrl-b moving it to
+    /// the background): a script's call runs that one. None: it's the tool itself.
+    fn inner(&self) -> Option<Rc<dyn KernelTool>> {
+        None
+    }
 }
 
 /// A tool call under way while its input streams in.

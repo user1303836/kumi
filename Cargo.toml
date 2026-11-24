@@ -108,6 +108,8 @@ rustls-platform-verifier = "0.7"
 # Zstandard in pure Rust, for Serum 2's preset bodies.
 ruzstd = "0.9"
 rusqlite = { version = "0.40", features = ["bundled"] }
+# QuickJS, compiled in: Max for Live device code is run in it before a device is made, and so are the model's read scripts.
+rquickjs = { version = "0.9", features = ["bindgen", "classes", "properties"] }
 encoding_rs = "0.8"
 ryu = "1"
 # preserve_order: JSON objects keep insertion order, as JavaScript's do, so files and hashes come out the same.

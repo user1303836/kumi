@@ -1436,6 +1436,7 @@ dependencies = [
  "memchr",
  "rand 0.9.5",
  "regex",
+ "rquickjs",
  "serde",
  "serde_json",
  "sha2",

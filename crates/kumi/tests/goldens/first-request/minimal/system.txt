@@ -30,3 +30,5 @@ Read with bounded discovery. Default page size is 25, traversal budget 1000. Pre
 The target is the current open Set, possibly unnamed/unsaved, not a durable project. Opening another Set switches to that Set's conversation. Some same-name/unsaved Set switches may be undetectable; /new starts a fresh conversation (the last one stays kept; /conversations goes back to it). A Set's conversation continues between sessions; nothing from an earlier session (references, values) is current.
 
 vst3 (find_tools) discovers installed VST3 processors and creates/edits their presets locally; use it when choosing new processing, before native fallback or external research. Reuse suitable processors already in the project.
+
+To read much of the Set and keep a little of it (something from every track, the whole of a long list), write one read_with_code script over your read tools, rather than reading call by call or running a script in Live: only what it returns comes back.

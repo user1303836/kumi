@@ -204,6 +204,7 @@ clips, the transport and recording together; `/stop` does the same any time.
 | `render` | Renders an audio track's own clips to a file without playing them, before its devices (needs the extension) |
 | `make_device` | Makes a Max for Live device, or a new one from a device that's already there, never writing the original ([the guide](KUMI_GUIDE.md#making-max-for-live-devices)) |
 | `watch_me` | Notes the Set, then sees what you changed by hand, for a recipe |
+| `read_with_code` | Runs a script inside Kumi that calls the read tools as functions and keeps only the answer, for a question over many tracks, devices or clips; it changes nothing, and it's there in REAPER and Renoise too |
 | `run_python` | Runs Python inside Live for what the other tools don't cover; one step in Live's undo, no HISTORY row |
 | `undo_in_live` | Live's own undo or redo, once |
 
