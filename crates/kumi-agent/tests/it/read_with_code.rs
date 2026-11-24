@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use kumi_agent::kernel::code;
 use kumi_common::abort::Signal;
 use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::daw::DawProfile;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 
@@ -93,14 +94,14 @@ fn project() -> Project {
 }
 
 async fn run(tools: &[Rc<dyn KernelTool>], script: &str) -> ToolResult {
-    let tool = code::tool("Live", tools).expect("a project to read");
+    let tool = code::tool(&DawProfile::ABLETON, tools).expect("a project to read");
     tool.execute(json!({"code": script}).as_object().unwrap().clone(), Signal::new()).await.unwrap()
 }
 
 #[tokio::test]
 async fn a_script_reads_every_device_and_only_its_answer_comes_back() {
     let project = project();
-    let tool = code::tool("Live", &project.tools).unwrap();
+    let tool = code::tool(&DawProfile::ABLETON, &project.tools).unwrap();
     // Its functions are the tools that only read the project: no change tool, none that reads the DAW and writes a
     // file, and nothing that leaves the computer.
     assert!(tool.description().ends_with("Functions: list_devices, read_device."), "{}", tool.description());
@@ -134,7 +135,7 @@ return {low, others: [typeof set_threshold, typeof make_device, typeof search_we
     assert_eq!(project.read.borrow().len(), 40);
     assert!(project.changed.borrow().is_empty());
     // Without a DAW to read, there's no such tool: a few searches need no script.
-    assert!(code::tool("Live", &project.tools[2..]).is_none());
+    assert!(code::tool(&DawProfile::ABLETON, &project.tools[2..]).is_none());
 }
 
 #[tokio::test]
@@ -244,7 +245,7 @@ impl KernelTool for Stuck {
 async fn stopping_the_answer_stops_the_script_and_the_read_it_waits_on() {
     let (started, dropped) = (Rc::new(tokio::sync::Notify::new()), Rc::new(tokio::sync::Notify::new()));
     let tools: Vec<Rc<dyn KernelTool>> = vec![Rc::new(Stuck { started: started.clone(), dropped: dropped.clone() })];
-    let tool = code::tool("Live", &tools).unwrap();
+    let tool = code::tool(&DawProfile::ABLETON, &tools).unwrap();
     let signal = Signal::new();
     let input = json!({"code": "for (;;) { try { read_slowly({}); } catch (error) {} }"}).as_object().unwrap().clone();
     let stop = signal.clone();

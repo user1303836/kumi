@@ -1802,7 +1802,7 @@ impl Session {
             }
             tools.extend(self.job_tools());
             // One script in place of many reads, over the tools above that only read.
-            tools.extend(crate::kernel::code::tool(self.0.options.profile.words.app, &tools));
+            tools.extend(crate::kernel::code::tool(&self.0.options.profile, &tools));
             let value = (self.0.options.kernel_factory)(KernelOptions {
                 instructions,
                 tools,

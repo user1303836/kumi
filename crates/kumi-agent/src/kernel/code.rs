@@ -93,18 +93,24 @@ pub fn guidance(profile: &DawProfile) -> String {
     )
 }
 
-/// The tool, over those of `tools` that only read; None where none reads the DAW. `app` is the DAW as the producer
-/// calls it.
-pub fn tool(app: &str, tools: &[Rc<dyn KernelTool>]) -> Option<Rc<dyn KernelTool>> {
+/// The tool, over those of `tools` that only read; None where none reads the DAW. The DAW's `profile` gives its name
+/// and how its reads answer.
+pub fn tool(profile: &DawProfile, tools: &[Rc<dyn KernelTool>]) -> Option<Rc<dyn KernelTool>> {
     let readers: Vec<&Rc<dyn KernelTool>> = tools.iter().filter(|tool| reads(tool.as_ref())).collect();
     // The example's read: one the model has in every request, when there is one.
     let of_the_daw = || readers.iter().filter(|tool| reads_the_daw(tool.as_ref()));
     let first = of_the_daw().find(|tool| !tool.deferred()).or_else(|| of_the_daw().next())?.name().to_string();
     let names: Vec<&str> = readers.iter().map(|tool| tool.name()).collect();
+    let app = profile.words.app;
+    // Nothing else tells a script's author where a result keeps its rows before a first result does.
+    let answers = match profile.vocab.read_answer {
+        "" => String::new(),
+        answers => format!(" In {app}, {answers}."),
+    };
     let description = format!(
         "Reads a lot and keeps only what you need: runs JavaScript in Kumi (not in {app}) where each read tool below is a \
          function. A function takes its tool's input and returns its result (an object when that's JSON), and throws \
-         the tool's error; calls are plain, with no await. Use it when an answer takes more than a few reads, or far \
+         the tool's error; calls are plain, with no await.{answers} Use it when an answer takes more than a few reads, or far \
          less than the reads return: loop over tracks or over a list's pages (follow a cursor to its end), filter, \
          count and compare in the script, and `return` only the answer, as small as will do (the few rows, their refs, \
          a count). Refs it returns are current. print() adds a line to the result. It changes nothing. E.g. `const \
