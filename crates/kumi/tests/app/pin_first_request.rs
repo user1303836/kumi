@@ -571,3 +571,17 @@ local_test!(a_script_naming_a_track_as_the_model_read_it_reaches_live_with_the_t
     let (_, args) = called.iter().find(|(name, _)| name == "live_run_python").expect("the script reached Live");
     assert_eq!(args["code"], format!("[t for t in song.tracks if t.name == \"Bass{}\"]", hidden_order()));
 });
+
+// A read script's calls are Live's own reads (read_with_code): the session offers the tool with Live's reads as its
+// functions, a call in the script reaches Live as the model's own would, and only what the script returns goes back.
+local_test!(a_read_script_reads_live_through_the_models_read_tools_and_only_its_answer_goes_back, {
+    let code = "const tracks = live_discover({kind: \"track\"}).live.items;\n\
+                return tracks.filter(track => track.mediaKind === \"midi\").map(track => track.ref);";
+    let script: Script = Rc::new(move |n| if n == 1 { call("read_with_code", json!({"code": code})) } else { answer("Done.") });
+    let run = run(FULL, script).await;
+    let requests = run.main.requests.borrow();
+    let sent = serde_json::to_value(&requests[1].messages).unwrap();
+    let result = &sent.as_array().unwrap().last().unwrap()["content"][0];
+    assert_eq!(result["toolName"], "read_with_code", "{sent}");
+    assert_eq!(result["output"], json!({"type": "text", "value": "{\"result\":[\"track:1\",\"track:3\"],\"calls\":1}"}), "{sent}");
+});

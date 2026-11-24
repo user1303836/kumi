@@ -50,6 +50,11 @@ const STACK: usize = 512 * 1024;
 const PRINTED: usize = 4_000;
 /// The most of a call's error that a script's own error repeats.
 const CALL_ERROR: usize = 1_000;
+/// How much of a result's fields an error shows: how deep, how many of an object's, how many tools', how long each.
+const OUTLINE_DEPTH: usize = 4;
+const OUTLINE_FIELDS: usize = 12;
+const OUTLINE_TOOLS: usize = 4;
+const OUTLINE: usize = 400;
 /// Tools that only read, which a script still doesn't call: the web. Nothing a script reads leaves the computer.
 const LEFT_OUT: &[&str] = &["search_web", "read_web"];
 
@@ -156,6 +161,8 @@ impl KernelTool for ReadWithCode {
         if let Err(error) = script {
             return Ok(ToolResult::error(format!("Kumi couldn't start the script ({error}): read with your tools instead.")));
         }
+        // What each function last returned: a script that read a field a result doesn't have is shown the fields it has.
+        let read = RefCell::new(IndexMap::new());
         // The answer stopped: so is the script, wherever it is, and the read it waits on.
         let stopped = || ToolResult::error("The script was stopped.");
         loop {
@@ -171,9 +178,14 @@ impl KernelTool for ReadWithCode {
                         _ = signal.cancelled() => return Ok(stopped()),
                         called = self.call(&name, &input, &signal) => called,
                     };
+                    if called.ok {
+                        read.borrow_mut().insert(name, called.text.clone());
+                    }
                     let _ = answer.send(called);
                 }
-                Some(Ask::Ended(ended)) => return Ok(result(ended, flags.calls.load(Ordering::Relaxed).min(MOST_CALLS))),
+                Some(Ask::Ended(ended)) => {
+                    return Ok(result(ended, flags.calls.load(Ordering::Relaxed).min(MOST_CALLS), &read.borrow()));
+                }
                 None => return Ok(ToolResult::error("The script stopped without an answer: read with your tools instead.")),
             }
         }
@@ -227,8 +239,9 @@ enum How {
     /// What it returned, as JSON; None when it returned nothing JSON has.
     Returned(Option<String>),
     /// What it threw (or why it couldn't be read as a script), and about where: the engine keeps a line for each call
-    /// and each `throw`, so an error between two is given the earlier one's.
-    Threw { error: String, line: Option<u32> },
+    /// and each `throw`, so an error between two is given the earlier one's. `misread`: it took a value for what it
+    /// wasn't (a field a result doesn't have, a name that isn't there).
+    Threw { error: String, line: Option<u32>, misread: bool },
     /// Stopped: by its own bounds, or with the answer.
     Stopped(Why),
     /// It waits on something that never comes.
@@ -305,7 +318,7 @@ fn run(code: &str, names: &[String], asks: &mpsc::UnboundedSender<Ask>, flags: &
         let context = Context::full(&runtime)?;
         context.with(|ctx| within(&ctx, code, names, asks, flags, &printed))
     })()
-    .unwrap_or_else(|error| How::Threw { error: error.to_string(), line: None });
+    .unwrap_or_else(|error| How::Threw { error: error.to_string(), line: None, misread: false });
     // Stopped is stopped, whatever the script made of it.
     let how = match flags.why() {
         Why::No => how,
@@ -413,22 +426,69 @@ fn shown<'js>(ctx: &Ctx<'js>, value: JsValue<'js>) -> String {
 
 /// What a script threw, in its own words, with the line it was near.
 fn thrown<'js>(ctx: &Ctx<'js>, error: JsError) -> How {
-    let JsError::Exception = error else { return How::Threw { error: error.to_string(), line: None } };
+    let JsError::Exception = error else { return How::Threw { error: error.to_string(), line: None, misread: false } };
     let thrown = ctx.catch();
     let text = |value: JsValue<'js>| Coerced::<String>::from_js(ctx, value).map(|text| text.0).unwrap_or_default();
     let Some(object) = thrown.as_object().filter(|object| object.is_error()).cloned() else {
-        return How::Threw { error: text(thrown), line: None };
+        return How::Threw { error: text(thrown), line: None, misread: false };
     };
     let field = |name: &str| object.get::<_, JsValue<'js>>(name).ok().filter(|value| !value.is_undefined()).map(&text).unwrap_or_default();
     let (kind, message, stack) = (field("name"), field("message"), field("stack"));
     let line = LINE.captures(&stack).and_then(|found| found[1].parse().ok());
     // A plain Error is a call's (the tool's own words, which name it) or the script's own `throw`: its kind adds nothing.
     let error = if kind.is_empty() || kind == "Error" { message } else { format!("{kind}: {message}") };
-    How::Threw { error, line }
+    How::Threw { error, line, misread: matches!(kind.as_str(), "TypeError" | "ReferenceError") }
 }
 
-/// The call's result: what the script returned, or what went wrong and what to do about it.
-fn result(ended: Ended, calls: usize) -> ToolResult {
+/// A result's fields without their values, as a script's author needs them: `{items: [{ref, name}], nextCursor}`.
+fn outline(value: &Value, depth: usize) -> String {
+    match value {
+        Value::Object(_) | Value::Array(_) if depth == 0 => "…".into(),
+        Value::Object(fields) => {
+            let mut shown: Vec<String> = fields
+                .iter()
+                .take(OUTLINE_FIELDS)
+                .map(|(name, value)| match value {
+                    Value::Object(_) | Value::Array(_) => format!("{name}: {}", outline(value, depth - 1)),
+                    _ => name.clone(),
+                })
+                .collect();
+            if fields.len() > OUTLINE_FIELDS {
+                shown.push("…".into());
+            }
+            format!("{{{}}}", shown.join(", "))
+        }
+        Value::Array(items) => format!("[{}]", items.first().map(|first| outline(first, depth - 1)).unwrap_or_default()),
+        Value::String(_) => "text".into(),
+        Value::Number(_) => "number".into(),
+        Value::Bool(_) => "true or false".into(),
+        Value::Null => "null".into(),
+    }
+}
+
+/// What the script's reads returned, by their fields: the last result of each function it called.
+fn outlines(read: &IndexMap<String, String>) -> String {
+    if read.is_empty() {
+        return String::new();
+    }
+    let mut shown: Vec<String> = read
+        .iter()
+        .take(OUTLINE_TOOLS)
+        .map(|(name, text)| {
+            let fields = serde_json::from_str::<Value>(text).map_or("text".into(), |value| outline(&value, OUTLINE_DEPTH));
+            let more = if fields.len() > OUTLINE { "…" } else { "" };
+            format!("{name}: {}{more}", cut(&fields, OUTLINE))
+        })
+        .collect();
+    if read.len() > OUTLINE_TOOLS {
+        shown.push("…".into());
+    }
+    format!(" Its reads returned {}.", shown.join("; "))
+}
+
+/// The call's result: what the script returned, or what went wrong and what to do about it. `read` is what each
+/// function last returned.
+fn result(ended: Ended, calls: usize, read: &IndexMap<String, String>) -> ToolResult {
     let made = match calls {
         1 => "1 call".to_string(),
         calls => format!("{calls} calls"),
@@ -441,11 +501,12 @@ fn result(ended: Ended, calls: usize) -> ToolResult {
         }
         How::Returned(None) if !ended.printed.is_empty() => ToolResult::text(stringify(&json!({"printed": ended.printed, "calls": calls}))),
         How::Returned(None) => ToolResult::error(format!("The script returned nothing ({made} made): end it with `return` and the answer.")),
-        How::Threw { error, line } => {
+        How::Threw { error, line, misread } => {
             let at = line.map(|line| format!(" near line {line}")).unwrap_or_default();
             let error = error.trim_end_matches('.');
             let memory = if error.contains("out of memory") { " A script has 64 MB: keep less of what it reads." } else { "" };
-            ToolResult::error(format!("The script stopped{at}: {error}.{memory} It had made {made}.{printed}"))
+            let fields = if misread { outlines(read) } else { String::new() };
+            ToolResult::error(format!("The script stopped{at}: {error}.{memory} It had made {made}.{fields}{printed}"))
         }
         How::Waits => ToolResult::error(format!(
             "The script waits for something that never comes ({made} made): its functions answer at once, so call them without promises or timers.{printed}"

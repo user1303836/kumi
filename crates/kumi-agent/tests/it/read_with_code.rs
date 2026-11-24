@@ -163,11 +163,11 @@ return {refused, name: read_device({device: "device:3"}).name};"#,
     assert!(result.is_error);
     assert_eq!(result.text, "The script stopped near line 3: read_device: No device 99. It had made 2 calls.\nPrinted:\nreading");
 
-    // And so does the script's own mistake.
+    // And so does the script's own mistake: a field the result doesn't have, answered with the fields it has.
     let result = run(&project.tools, "const page = list_devices();\nreturn page.rows.length;").await;
     assert!(result.is_error);
     assert!(result.text.starts_with("The script stopped near line ") && result.text.contains(": TypeError: "), "{}", result.text);
-    assert!(result.text.ends_with(" It had made 1 call."), "{}", result.text);
+    assert!(result.text.ends_with(" It had made 1 call. Its reads returned list_devices: {items: [text], nextCursor}."), "{}", result.text);
     let result = run(&project.tools, "return list_devices(").await;
     assert!(result.is_error);
     assert!(result.text.starts_with("The script stopped") && result.text.contains(": SyntaxError: "), "{}", result.text);
