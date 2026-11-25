@@ -1,7 +1,7 @@
 {
-  "toolsKey": "8fNdFORCFjtzFERDMAb-lh",
-  "fixed": 74671,
-  "fixedByHand": 74671,
+  "toolsKey": "H8uA0uEnkf5MY0VJd6_rn7",
+  "fixed": 76729,
+  "fixedByHand": 76729,
   "sent": [
     "live_discover",
     "live_browser_search",
@@ -34,6 +34,7 @@
     "note_gap",
     "start_job",
     "jobs",
+    "read_with_code",
     "find_tools",
     "call_tool"
   ],

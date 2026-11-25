@@ -1849,8 +1849,47 @@ local_test!(a_rebuilt_kernel_keeps_the_conversations_system_text_until_the_produ
     h.session.refresh().await.unwrap();
     let last = h.record.created.borrow().last().unwrap().instructions.clone();
     assert!(!last.contains("Prefers short reverbs") && last.contains("The Reese is the main bass"), "{last}");
+    // The DAW's reads come (it was away, and answers now): the script of reads is offered, and the text says when to
+    // write one, though the conversation and the DAW's own instructions are what they were. They go again: so does it.
+    let script = |h: &Harness| {
+        let created = h.record.created.borrow();
+        let last = created.last().unwrap();
+        (last.tools.iter().any(|tool| tool.name() == "read_with_code"), last.instructions.contains("read_with_code"))
+    };
+    assert_eq!(script(&h), (false, false));
+    h.observation.borrow_mut().tools = vec![Rc::new(ReadsTheDaw)];
+    h.session.reconfigure().await.unwrap();
+    h.session.refresh().await.unwrap();
+    assert_eq!(script(&h), (true, true));
+    h.observation.borrow_mut().tools = vec![];
+    h.session.reconfigure().await.unwrap();
+    h.session.refresh().await.unwrap();
+    assert_eq!(script(&h), (false, false));
     h.session.close().await.unwrap();
 });
+/// One of a DAW's reads.
+struct ReadsTheDaw;
+#[async_trait(?Send)]
+impl KernelTool for ReadsTheDaw {
+    fn name(&self) -> &str {
+        "read_tracks"
+    }
+    fn description(&self) -> &str {
+        "Reads the tracks."
+    }
+    fn input_schema(&self) -> JsonObject {
+        json!({"type":"object"}).as_object().unwrap().clone()
+    }
+    fn reach(&self) -> Reach {
+        Reach::DawRead
+    }
+    fn only_reads(&self) -> bool {
+        true
+    }
+    async fn execute(&self, _: JsonObject, _: Signal) -> Result<ToolResult, RuntimeError> {
+        Ok(ToolResult::text("[]"))
+    }
+}
 #[derive(Clone)]
 struct Plan {
     received: Rc<RefCell<Vec<JsonObject>>>,

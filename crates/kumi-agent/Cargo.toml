@@ -39,6 +39,8 @@ memchr.workspace = true
 rand.workspace = true
 regex.workspace = true
 fancy-regex.workspace = true
+# The model's read scripts run in it (kernel/code.rs).
+rquickjs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

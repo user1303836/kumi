@@ -317,11 +317,13 @@ struct Wanted {
     asked: Option<String>,
 }
 /// A conversation's system text, and what it was made from that a rebuild can't keep: the integration's own
-/// instructions and the words it adds at the end (Live's: Willington's).
+/// instructions, the words it adds at the end (Live's: Willington's), and whether the script of reads is offered
+/// (its paragraph is there exactly when the tool is).
 struct SystemText {
     conversation: String,
     base: String,
     addendum: String,
+    scripts: bool,
     text: String,
 }
 
@@ -969,6 +971,11 @@ impl Session {
         kumi_types::place::unsaved(self.0.options.profile.id.unwrap_or(DawId::Ableton))
     }
     fn emit(&self, event: SessionEvent) {
+        // What a tool says it's doing inside a script of reads isn't shown: the step is the script's ("reading with a
+        // script"), and a call in it has no start or end of its own to take its words away again.
+        if matches!(event, SessionEvent::Doing { .. }) && crate::kernel::code::calling() {
+            return;
+        }
         // A step moved to the background (ctrl-b): what its tools say from then on is its job's. Only what tools say: the
         // job's own status, which their words change, goes to the producer.
         if matches!(event, SessionEvent::Doing { .. } | SessionEvent::Web(_) | SessionEvent::Watched(_)) {
@@ -1743,7 +1750,9 @@ impl Session {
             let addendum = integration
                 .map(|integration| integration.instructions_addendum(&|name| observation.tools.iter().any(|tool| tool.name() == name)))
                 .unwrap_or_default();
-            // The same conversation keeps its system text across rebuilds, unless the producer changed what it holds.
+            // The same conversation keeps its system text across rebuilds, unless the producer changed what it holds,
+            // or what it says of the tools no longer holds (the DAW came or went).
+            let scripts = crate::kernel::code::offered(&observation.tools);
             let kept = {
                 let s = self.0.state.borrow();
                 s.system
@@ -1753,6 +1762,7 @@ impl Session {
                             && kept.conversation == conversation
                             && kept.base == observation.instructions
                             && kept.addendum == addendum
+                            && kept.scripts == scripts
                     })
                     .map(|kept| kept.text.clone())
             };
@@ -1765,6 +1775,7 @@ impl Session {
                         conversation: conversation.clone(),
                         base: observation.instructions.clone(),
                         addendum,
+                        scripts,
                         text: text.clone(),
                     });
                     s.system_stale = false;
@@ -1801,6 +1812,8 @@ impl Session {
                 tools.push(taste.tool());
             }
             tools.extend(self.job_tools());
+            // One script in place of many reads, over the tools above that only read.
+            tools.extend(crate::kernel::code::tool(&self.0.options.profile, &tools));
             let value = (self.0.options.kernel_factory)(KernelOptions {
                 instructions,
                 tools,
@@ -1870,6 +1883,11 @@ impl Session {
                 .unwrap_or_default(),
             habits,
             crate::core::plugin_tools::GUIDANCE.into(),
+            if crate::kernel::code::offered(&observation.tools) {
+                crate::kernel::code::guidance(&self.0.options.profile)
+            } else {
+                String::new()
+            },
             crate::core::audio_tools::guidance(self.0.options.audio.as_deref()).await.into(),
             music,
             // A DAW Kumi only reads gets nothing about making changes (its recipe and technique tools aren't made): its

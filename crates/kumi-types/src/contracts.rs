@@ -180,6 +180,26 @@ pub trait KernelTool {
     fn concurrent(&self) -> bool {
         CONCURRENT.contains(&self.name())
     }
+    /// Whether all it does is read (the DAW, this computer, Kumi's own records), whatever its input: it changes
+    /// nothing in the DAW, plays and renders nothing, writes no file, starts no work that outlasts the call and never
+    /// goes online. A script of reads may call it (read_with_code), up to 2,000 times with nothing to approve, so a
+    /// tool says so only when every call of it holds to that. No by default: neither `reach` nor `concurrent` says
+    /// it (a tool that reads the DAW may write a file; a search away from the DAW may render a clip to compare it, or
+    /// fetch a page it hasn't kept).
+    fn only_reads(&self) -> bool {
+        false
+    }
+    /// How often the refs and cursors its reads return have been dropped (in Live, when a read fails or the Set
+    /// changes). A script of reads keeps what it read in its own variables and can't go on with them once they're
+    /// gone, so it's stopped when this moves. 0 for a tool whose results stay good to name.
+    fn dropped(&self) -> u64 {
+        0
+    }
+    /// The tool this one stands in front of, when all it adds is for a call of the answer's own (ctrl-b moving it to
+    /// the background): a script's call runs that one. None: it's the tool itself.
+    fn inner(&self) -> Option<Rc<dyn KernelTool>> {
+        None
+    }
 }
 
 /// A tool call under way while its input streams in.

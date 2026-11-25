@@ -259,6 +259,13 @@ impl KernelTool for Backgroundable {
     fn concurrent(&self) -> bool {
         self.tool.concurrent()
     }
+    fn only_reads(&self) -> bool {
+        self.tool.only_reads()
+    }
+    /// A script's call isn't a step of the answer: ctrl-b has nothing of it to move.
+    fn inner(&self) -> Option<Rc<dyn KernelTool>> {
+        Some(self.tool.clone())
+    }
 }
 
 impl Session {

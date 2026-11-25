@@ -168,6 +168,8 @@ fn the_built_kumi_says_its_release_in_its_user_agent() {
 fn the_built_kumi_says_its_release_in_the_bridges_handshake() {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::fs::PermissionsExt;
+    // The build makes this folder: tests run from an archive on another machine (Extended's) start without it.
+    std::fs::create_dir_all(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (bin, user, transport, state) =
         (dir.path().join("bin"), dir.path().join("user"), dir.path().join("transport"), dir.path().join("plugin/state"));

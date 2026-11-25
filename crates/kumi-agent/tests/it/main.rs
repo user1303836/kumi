@@ -25,6 +25,7 @@ mod palette;
 mod pin_wire;
 mod protocol;
 mod providers;
+mod read_with_code;
 mod recall;
 mod recipes;
 mod references;

@@ -510,7 +510,7 @@ impl Mutations {
                     history.restructured(&record.id, shift);
                 }
                 None => {
-                    book.refs.clear();
+                    book.drop_refs();
                     book.known.clear();
                     book.clear_names();
                 }

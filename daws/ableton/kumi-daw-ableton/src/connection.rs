@@ -251,7 +251,7 @@ impl LiveConnection {
     }
     pub fn discard_reads(&self) {
         let mut book = self.references.borrow_mut();
-        book.refs.clear();
+        book.drop_refs();
         book.cursors.clear();
     }
     pub fn assert_lease(&self, lease: u64, signal: &Signal) -> Result<(), ReadError> {
